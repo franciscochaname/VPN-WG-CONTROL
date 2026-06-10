@@ -18,6 +18,7 @@ import {
 function App() {
   const [activeView, setActiveView] = useState("dashboard");
   const [routers, setRouters] = useState([]);
+  const [tunnels, setTunnels] = useState([]);
   const [metrics, setMetrics] = useState({
     routers: 0,
     tunnels: 0,
@@ -39,6 +40,7 @@ function App() {
     try {
       const snapshot = await getDashboardSnapshot();
       setRouters(snapshot.routers);
+      setTunnels(snapshot.tunnels || []);
       setMetrics(snapshot.metrics);
       setSelectedRouterId((currentId) => {
         if (snapshot.routers.some((router) => router.id === currentId)) {
@@ -66,6 +68,7 @@ function App() {
   async function handleSyncWireGuard(routerId) {
     const snapshot = await syncWireGuard(routerId);
     setRouters(snapshot.routers);
+    setTunnels(snapshot.tunnels || []);
     setMetrics(snapshot.metrics);
     return snapshot;
   }
@@ -93,6 +96,7 @@ function App() {
             isLoading={isLoading}
             metrics={metrics}
             routers={routers}
+            tunnels={tunnels}
             selectedRouter={selectedRouter}
             onOpenRouterRegistration={() => setActiveView("routers")}
             onRouterCreated={refreshWorkspace}
@@ -119,6 +123,7 @@ function ContentView({
   isLoading,
   metrics,
   routers,
+  tunnels,
   selectedRouter,
   onOpenRouterRegistration,
   onRouterCreated,
@@ -145,6 +150,7 @@ function ContentView({
       isLoading={isLoading}
       metrics={metrics}
       routers={routers}
+      tunnels={tunnels}
       selectedRouter={selectedRouter}
       onOpenRouterRegistration={onOpenRouterRegistration}
     />

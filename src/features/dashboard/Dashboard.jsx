@@ -21,7 +21,7 @@ function buildStats(metrics) {
   ];
 }
 
-function Dashboard({ isLoading, metrics, routers, selectedRouter, onOpenRouterRegistration }) {
+function Dashboard({ isLoading, metrics, routers, tunnels, selectedRouter, onOpenRouterRegistration }) {
   const stats = buildStats(metrics);
 
   return (
@@ -35,10 +35,10 @@ function Dashboard({ isLoading, metrics, routers, selectedRouter, onOpenRouterRe
       <div className="rounded-lg border border-warm-line bg-warm-panel p-5 shadow-soft">
         <div className="mb-4 flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold">Mapa operativo</h2>
+            <h2 className="text-lg font-semibold">Monitor de topologia</h2>
             <p className="text-sm text-warm-muted">
               {routers.length > 0
-                ? "Visualizacion basada solo en routers registrados."
+                ? "Lienzo de red basado en routers y peers WireGuard reales."
                 : "Registra un router Mikrotik para iniciar el monitoreo."}
             </p>
           </div>
@@ -49,7 +49,7 @@ function Dashboard({ isLoading, metrics, routers, selectedRouter, onOpenRouterRe
             </button>
           </div>
         </div>
-        <TopologyMap isLoading={isLoading} routers={routers} selectedRouter={selectedRouter} />
+        <TopologyMap isLoading={isLoading} routers={routers} tunnels={tunnels} selectedRouter={selectedRouter} />
       </div>
     </section>
   );

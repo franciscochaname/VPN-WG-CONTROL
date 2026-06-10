@@ -350,6 +350,7 @@ function getDashboardSnapshot() {
 
   return {
     routers,
+    tunnels: listWireGuardTunnels(),
     metrics: {
       routers: routers.length,
       tunnels: tunnelCount,

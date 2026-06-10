@@ -85,3 +85,5 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego operacion real para crear peers WireGuard en RouterOS con `/interface/wireguard/peers/add`.
 - Se agrego formulario WireGuard para seleccionar llave publica de la boveda o ingresar una publica manual.
 - Se mantiene la regla de no crear peers locales si RouterOS no confirma la operacion.
+- Se mejoro el monitor de topologia con un lienzo tipo laboratorio de red: grilla, nodos, enlaces animados y barra de estado.
+- El monitor ahora consume routers y tuneles reales del snapshot local, sin crear conexiones de ejemplo.
