@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Dashboard from "../features/dashboard/Dashboard.jsx";
+import WireGuardKeys from "../features/keys/WireGuardKeys.jsx";
 import Header from "../features/layout/Header.jsx";
 import OperationsPanel from "../features/layout/OperationsPanel.jsx";
 import Sidebar from "../features/layout/Sidebar.jsx";
@@ -133,6 +134,10 @@ function ContentView({
 
   if (activeView === "security") {
     return <SecurityCenter />;
+  }
+
+  if (activeView === "keys") {
+    return <WireGuardKeys routers={routers} />;
   }
 
   return (

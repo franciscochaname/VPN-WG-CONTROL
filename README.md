@@ -79,3 +79,6 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego verificacion de cifrado local con `safeStorage` desde Electron.
 - Se agrego panel de seguridad para revisar cifrado, aislamiento IPC y persistencia de credenciales.
 - Se agrego vista WireGuard para listar tuneles/peers reales sincronizados en `tb_tuneles`.
+- Se agrego generador local de llaves WireGuard X25519 compatible con formato base64.
+- Se agrego persistencia de llaves privadas cifradas en `tb_wireguard_keys`.
+- Se agrego vista `Llaves WG` para generar, listar, copiar publicas y eliminar llaves locales.

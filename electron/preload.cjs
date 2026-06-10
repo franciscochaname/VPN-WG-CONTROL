@@ -18,5 +18,10 @@ contextBridge.exposeInMainWorld("vpnWgControl", {
   },
   wireguard: {
     listTunnels: (routerId) => ipcRenderer.invoke("wireguard:list-tunnels", routerId)
+  },
+  wireguardKeys: {
+    list: () => ipcRenderer.invoke("wireguard-keys:list"),
+    generate: (payload) => ipcRenderer.invoke("wireguard-keys:generate", payload),
+    remove: (keyId) => ipcRenderer.invoke("wireguard-keys:remove", keyId)
   }
 });

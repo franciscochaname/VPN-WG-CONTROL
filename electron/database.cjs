@@ -5,6 +5,7 @@ const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const { fetchWireGuardState, testRouterConnection } = require("./routerosClient.cjs");
 const { diagnoseRouterServices } = require("./serviceDiagnostics.cjs");
+const { generateWireGuardKeyPair } = require("./wireguardKeys.cjs");
 
 let db;
 let databaseFilePath;
@@ -82,9 +83,23 @@ function initializeDatabase(userDataPath) {
       FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS tb_wireguard_keys (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      private_key_encrypted TEXT NOT NULL,
+      assigned_router_id TEXT,
+      assigned_tunnel_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (assigned_router_id) REFERENCES tb_config_router(id) ON DELETE SET NULL,
+      FOREIGN KEY (assigned_tunnel_id) REFERENCES tb_tuneles(id) ON DELETE SET NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tuneles_router_id ON tb_tuneles(router_id);
     CREATE INDEX IF NOT EXISTS idx_logs_router_id ON tb_logs_eventos(router_id);
     CREATE INDEX IF NOT EXISTS idx_diagnosticos_router_id ON tb_diagnosticos(router_id);
+    CREATE INDEX IF NOT EXISTS idx_wireguard_keys_router_id ON tb_wireguard_keys(assigned_router_id);
   `);
   runMigrations();
 }
@@ -99,6 +114,9 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("dashboard:snapshot", () => getDashboardSnapshot());
   ipcMain.handle("security:health", () => getSecurityHealth());
   ipcMain.handle("wireguard:list-tunnels", (_event, routerId) => listWireGuardTunnels(routerId));
+  ipcMain.handle("wireguard-keys:list", () => listWireGuardKeys());
+  ipcMain.handle("wireguard-keys:generate", (_event, payload) => createWireGuardKey(payload));
+  ipcMain.handle("wireguard-keys:remove", (_event, keyId) => removeWireGuardKey(keyId));
 }
 
 function listRouters() {
@@ -363,6 +381,14 @@ function getSecurityHealth() {
       FROM tb_config_router
     `)
     .get();
+  const keyStats = db
+    .prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN LENGTH(private_key_encrypted) > 0 THEN 1 ELSE 0 END) AS encrypted
+      FROM tb_wireguard_keys
+    `)
+    .get();
 
   return {
     encryptionAvailable: safeStorage.isEncryptionAvailable(),
@@ -371,10 +397,81 @@ function getSecurityHealth() {
     databasePath: databaseFilePath,
     credentialCount: Number(credentialStats.total || 0),
     encryptedCredentialCount: Number(credentialStats.encrypted || 0),
+    wireGuardKeyCount: Number(keyStats.total || 0),
+    encryptedWireGuardKeyCount: Number(keyStats.encrypted || 0),
     secretsExposedToRenderer: false,
     contextIsolation: true,
     nodeIntegration: false
   };
+}
+
+function listWireGuardKeys() {
+  assertDatabase();
+
+  return db
+    .prepare(`
+      SELECT
+        k.id,
+        k.label,
+        k.public_key AS publicKey,
+        k.assigned_router_id AS assignedRouterId,
+        r.alias AS assignedRouterAlias,
+        k.assigned_tunnel_id AS assignedTunnelId,
+        k.created_at AS createdAt,
+        k.updated_at AS updatedAt
+      FROM tb_wireguard_keys k
+      LEFT JOIN tb_config_router r ON r.id = k.assigned_router_id
+      ORDER BY k.created_at DESC
+    `)
+    .all();
+}
+
+function createWireGuardKey(payload = {}) {
+  assertDatabase();
+  const label = cleanText(payload.label) || `Llave WireGuard ${new Date().toLocaleString("es-PE")}`;
+  const assignedRouterId = cleanText(payload.assignedRouterId) || null;
+  const keyPair = generateWireGuardKeyPair();
+  const now = new Date().toISOString();
+  const keyId = randomUUID();
+
+  if (assignedRouterId) {
+    assertRouterExists(assignedRouterId);
+  }
+
+  db.prepare(`
+    INSERT INTO tb_wireguard_keys (
+      id,
+      label,
+      public_key,
+      private_key_encrypted,
+      assigned_router_id,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    keyId,
+    label,
+    keyPair.publicKey,
+    encryptSecret(keyPair.privateKey),
+    assignedRouterId,
+    now,
+    now
+  );
+
+  insertLog(assignedRouterId, "wireguard-keys", "info", `Llave WireGuard generada localmente: ${label}.`);
+  return listWireGuardKeys().find((item) => item.id === keyId);
+}
+
+function removeWireGuardKey(keyId) {
+  assertDatabase();
+
+  if (!keyId || typeof keyId !== "string") {
+    throw new Error("Llave WireGuard invalida.");
+  }
+
+  db.prepare("DELETE FROM tb_wireguard_keys WHERE id = ?").run(keyId);
+  return { ok: true };
 }
 
 function listWireGuardTunnels(routerId) {
@@ -665,6 +762,14 @@ function toInteger(value) {
 
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function assertRouterExists(routerId) {
+  const router = db.prepare("SELECT id FROM tb_config_router WHERE id = ?").get(routerId);
+
+  if (!router) {
+    throw new Error("Router asignado no encontrado.");
+  }
 }
 
 function normalizeRouterRow(row) {

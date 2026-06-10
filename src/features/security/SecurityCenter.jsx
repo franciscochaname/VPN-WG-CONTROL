@@ -61,6 +61,13 @@ function SecurityCenter() {
             ok={health.credentialCount === health.encryptedCredentialCount}
           />
           <SecurityCard
+            icon={LockKeyhole}
+            label="Privadas WireGuard"
+            status={`${health.encryptedWireGuardKeyCount}/${health.wireGuardKeyCount}`}
+            detail="Llaves privadas WireGuard cifradas con safeStorage antes de guardarse."
+            ok={health.wireGuardKeyCount === health.encryptedWireGuardKeyCount}
+          />
+          <SecurityCard
             icon={ShieldCheck}
             label="Aislamiento Electron"
             status={health.contextIsolation && !health.nodeIntegration ? "Activo" : "Revisar"}

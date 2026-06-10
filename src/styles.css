@@ -414,6 +414,52 @@ button {
   padding: 5px 8px;
 }
 
+.key-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 14px;
+}
+
+.key-public {
+  display: block;
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: #2a2520;
+  font-size: 0.82rem;
+  padding: 10px;
+}
+
+.icon-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: #2a2520;
+  font-size: 0.82rem;
+  font-weight: 800;
+  min-height: 38px;
+  padding: 0 11px;
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+
+.icon-text-button:hover {
+  transform: translateY(-1px);
+  border-color: #e5a23a;
+}
+
+.icon-text-danger {
+  color: #a94727;
+}
+
 .dark-message {
   border-radius: 8px;
   font-size: 0.82rem;
