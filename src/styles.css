@@ -326,6 +326,94 @@ button {
   color: #3d7c66;
 }
 
+.empty-panel {
+  display: flex;
+  min-height: 220px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 8px;
+  border: 1px dashed #eadfce;
+  background: #fff9ef;
+  color: #73695f;
+  padding: 26px;
+  text-align: center;
+}
+
+.empty-panel h3 {
+  color: #2a2520;
+  font-size: 1.05rem;
+  font-weight: 750;
+}
+
+.empty-panel p {
+  max-width: 520px;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.security-badge {
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.security-badge-ok {
+  background: #edf5ef;
+  color: #3d7c66;
+}
+
+.security-badge-warn {
+  background: #fff1d6;
+  color: #9b6220;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fffdf8;
+  font-size: 0.86rem;
+}
+
+.data-table th {
+  background: #f4ead9;
+  color: #73695f;
+  font-size: 0.76rem;
+  letter-spacing: 0;
+  padding: 11px 12px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.data-table td {
+  border-top: 1px solid #eadfce;
+  color: #2a2520;
+  padding: 12px;
+  vertical-align: top;
+}
+
+.data-table td span {
+  display: block;
+  color: #73695f;
+  font-size: 0.78rem;
+  margin-top: 2px;
+}
+
+.inline-status {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  background: #edf5ef;
+  color: #3d7c66 !important;
+  font-size: 0.76rem !important;
+  font-weight: 800;
+  margin-top: 0 !important;
+  padding: 5px 8px;
+}
+
 .dark-message {
   border-radius: 8px;
   font-size: 0.82rem;

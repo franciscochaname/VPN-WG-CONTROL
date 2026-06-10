@@ -76,3 +76,6 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego configuracion de puerto WebFig por router.
 - Se agrego diagnostico real de servicios Mikrotik: API, API-SSL, Winbox, WebFig, HTTP y HTTPS.
 - Se agrego persistencia de diagnosticos en `tb_diagnosticos`.
+- Se agrego verificacion de cifrado local con `safeStorage` desde Electron.
+- Se agrego panel de seguridad para revisar cifrado, aislamiento IPC y persistencia de credenciales.
+- Se agrego vista WireGuard para listar tuneles/peers reales sincronizados en `tb_tuneles`.

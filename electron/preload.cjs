@@ -12,5 +12,11 @@ contextBridge.exposeInMainWorld("vpnWgControl", {
   },
   dashboard: {
     snapshot: () => ipcRenderer.invoke("dashboard:snapshot")
+  },
+  security: {
+    health: () => ipcRenderer.invoke("security:health")
+  },
+  wireguard: {
+    listTunnels: (routerId) => ipcRenderer.invoke("wireguard:list-tunnels", routerId)
   }
 });

@@ -3,7 +3,7 @@ import { KeyRound, LayoutDashboard, Network, Router, ShieldCheck } from "lucide-
 const navigationItems = [
   { id: "dashboard", label: "Panel", icon: LayoutDashboard },
   { id: "routers", label: "Routers", icon: Router },
-  { id: "topology", label: "Topologia", icon: Network },
+  { id: "wireguard", label: "WireGuard", icon: Network },
   { id: "security", label: "Seguridad", icon: ShieldCheck },
   { id: "keys", label: "Llaves WG", icon: KeyRound }
 ];

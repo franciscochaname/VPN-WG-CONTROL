@@ -7,12 +7,14 @@ const { fetchWireGuardState, testRouterConnection } = require("./routerosClient.
 const { diagnoseRouterServices } = require("./serviceDiagnostics.cjs");
 
 let db;
+let databaseFilePath;
 
 function initializeDatabase(userDataPath) {
   const databaseDir = path.join(userDataPath, "data");
   fs.mkdirSync(databaseDir, { recursive: true });
 
-  db = new DatabaseSync(path.join(databaseDir, "vpn-wg-control.sqlite"));
+  databaseFilePath = path.join(databaseDir, "vpn-wg-control.sqlite");
+  db = new DatabaseSync(databaseFilePath);
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
@@ -95,6 +97,8 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("routers:sync-wireguard", (_event, routerId) => syncWireGuard(routerId));
   ipcMain.handle("routers:diagnose-services", (_event, routerId) => diagnoseServices(routerId));
   ipcMain.handle("dashboard:snapshot", () => getDashboardSnapshot());
+  ipcMain.handle("security:health", () => getSecurityHealth());
+  ipcMain.handle("wireguard:list-tunnels", (_event, routerId) => listWireGuardTunnels(routerId));
 }
 
 function listRouters() {
@@ -336,6 +340,92 @@ function getDashboardSnapshot() {
       offlineRouters: routers.filter((router) => router.status === "offline").length
     }
   };
+}
+
+function getSecurityHealth() {
+  assertDatabase();
+  const canary = `vpn-wg-control:${randomUUID()}`;
+  let canEncryptDecrypt = false;
+  let encryptionError = null;
+
+  try {
+    const encrypted = encryptSecret(canary);
+    canEncryptDecrypt = decryptSecret(encrypted) === canary;
+  } catch (error) {
+    encryptionError = error.message;
+  }
+
+  const credentialStats = db
+    .prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN LENGTH(secret_encrypted) > 0 THEN 1 ELSE 0 END) AS encrypted
+      FROM tb_config_router
+    `)
+    .get();
+
+  return {
+    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    canEncryptDecrypt,
+    encryptionError,
+    databasePath: databaseFilePath,
+    credentialCount: Number(credentialStats.total || 0),
+    encryptedCredentialCount: Number(credentialStats.encrypted || 0),
+    secretsExposedToRenderer: false,
+    contextIsolation: true,
+    nodeIntegration: false
+  };
+}
+
+function listWireGuardTunnels(routerId) {
+  assertDatabase();
+  const params = [];
+  let where = "";
+
+  if (routerId) {
+    where = "WHERE t.router_id = ?";
+    params.push(routerId);
+  }
+
+  return db
+    .prepare(`
+      SELECT
+        t.id,
+        t.router_id AS routerId,
+        r.alias AS routerAlias,
+        r.host AS routerHost,
+        t.interface_name AS interfaceName,
+        t.peer_public_key AS peerPublicKey,
+        t.allowed_address AS allowedAddress,
+        t.endpoint,
+        t.last_handshake_at AS lastHandshakeAt,
+        t.rx_bytes AS rxBytes,
+        t.tx_bytes AS txBytes,
+        t.status,
+        t.created_at AS createdAt,
+        t.updated_at AS updatedAt
+      FROM tb_tuneles t
+      INNER JOIN tb_config_router r ON r.id = t.router_id
+      ${where}
+      ORDER BY r.alias, t.interface_name, t.allowed_address
+    `)
+    .all(...params)
+    .map((row) => ({
+      id: row.id,
+      routerId: row.routerId,
+      routerAlias: row.routerAlias,
+      routerHost: row.routerHost,
+      interfaceName: row.interfaceName,
+      peerPublicKey: row.peerPublicKey,
+      allowedAddress: row.allowedAddress,
+      endpoint: row.endpoint,
+      lastHandshakeAt: row.lastHandshakeAt,
+      rxBytes: Number(row.rxBytes || 0),
+      txBytes: Number(row.txBytes || 0),
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
 }
 
 function getRouterWithSecret(routerId) {
