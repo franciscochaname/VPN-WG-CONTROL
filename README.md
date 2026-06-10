@@ -68,3 +68,8 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego persistencia local SQLite desde Electron.
 - Se agrego cifrado local de token/clave con `safeStorage` antes de guardar credenciales.
 - Se prepararon tablas base: `tb_config_router`, `tb_tuneles` y `tb_logs_eventos`.
+- Se agrego cliente nativo RouterOS API por TCP/TLS sin dependencias externas.
+- Se agrego prueba real de conexion contra Mikrotik con actualizacion de estado `online`/`offline`.
+- Se agrego lectura real de identidad y version RouterOS cuando la conexion responde.
+- Se agrego sincronizacion WireGuard desde `/interface/wireguard/print` y `/interface/wireguard/peers/print`.
+- Se agrego registro local de errores/eventos tecnicos en `tb_logs_eventos`.

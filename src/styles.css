@@ -151,6 +151,30 @@ button {
   background: #fffdf8;
 }
 
+.router-status {
+  display: grid;
+  height: 25px;
+  width: 25px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+}
+
+.router-status-mint {
+  background: #edf5ef;
+  color: #4d9078;
+}
+
+.router-status-amber {
+  background: #fff1d6;
+  color: #9b6220;
+}
+
+.router-status-danger {
+  background: #fff1ed;
+  color: #a94727;
+}
+
 .field-label {
   display: grid;
   gap: 8px;
@@ -199,7 +223,8 @@ button {
 }
 
 .primary-button,
-.danger-button {
+.danger-button,
+.secondary-dark-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -235,6 +260,21 @@ button {
   min-height: 40px;
 }
 
+.secondary-dark-button {
+  width: 100%;
+  border: 1px solid rgba(255, 253, 248, 0.18);
+  background: rgba(255, 253, 248, 0.08);
+  color: #fffdf8;
+  min-height: 40px;
+}
+
+.secondary-dark-button:disabled,
+.danger-button:disabled {
+  cursor: progress;
+  opacity: 0.68;
+  transform: none;
+}
+
 .form-message {
   border-radius: 8px;
   font-size: 0.9rem;
@@ -250,4 +290,22 @@ button {
 .form-message-success {
   background: #edf5ef;
   color: #3d7c66;
+}
+
+.dark-message {
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.45;
+  padding: 10px;
+}
+
+.dark-message-error {
+  background: rgba(255, 193, 173, 0.16);
+  color: #ffd1c3;
+}
+
+.dark-message-success {
+  background: rgba(196, 233, 211, 0.14);
+  color: #d6f4e1;
 }

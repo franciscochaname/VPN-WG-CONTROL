@@ -4,10 +4,20 @@ import TopologyMap from "./TopologyMap.jsx";
 
 function buildStats(metrics) {
   return [
-    { label: "Routers registrados", value: String(metrics.routers), trend: metrics.routers > 0 ? "local" : "sin registros", icon: Router },
-    { label: "Tuneles detectados", value: String(metrics.tunnels), trend: "WireGuard", icon: Network },
+    {
+      label: "Routers registrados",
+      value: String(metrics.routers),
+      trend: metrics.onlineRouters > 0 ? `${metrics.onlineRouters} online` : "sin online",
+      icon: Router
+    },
+    { label: "Tuneles detectados", value: String(metrics.tunnels), trend: "lectura real", icon: Network },
     { label: "Eventos guardados", value: String(metrics.events), trend: "syslog/webhook", icon: Bell },
-    { label: "Conexiones pendientes", value: String(metrics.pendingConnections), trend: "por validar", icon: Clock3 }
+    {
+      label: "Pendientes/offline",
+      value: String(metrics.pendingConnections + metrics.offlineRouters),
+      trend: "por revisar",
+      icon: Clock3
+    }
   ];
 }
 

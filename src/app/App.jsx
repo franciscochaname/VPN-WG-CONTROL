@@ -4,7 +4,7 @@ import Header from "../features/layout/Header.jsx";
 import OperationsPanel from "../features/layout/OperationsPanel.jsx";
 import Sidebar from "../features/layout/Sidebar.jsx";
 import RouterRegistration from "../features/routers/RouterRegistration.jsx";
-import { getDashboardSnapshot, removeRouter } from "../shared/api/routerStore.js";
+import { getDashboardSnapshot, removeRouter, syncWireGuard, testRouterConnection } from "../shared/api/routerStore.js";
 
 function App() {
   const [activeView, setActiveView] = useState("dashboard");
@@ -13,7 +13,9 @@ function App() {
     routers: 0,
     tunnels: 0,
     events: 0,
-    pendingConnections: 0
+    pendingConnections: 0,
+    onlineRouters: 0,
+    offlineRouters: 0
   });
   const [selectedRouterId, setSelectedRouterId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -46,6 +48,19 @@ function App() {
     await refreshWorkspace();
   }
 
+  async function handleTestRouter(routerId) {
+    const router = await testRouterConnection(routerId);
+    await refreshWorkspace();
+    return router;
+  }
+
+  async function handleSyncWireGuard(routerId) {
+    const snapshot = await syncWireGuard(routerId);
+    setRouters(snapshot.routers);
+    setMetrics(snapshot.metrics);
+    return snapshot;
+  }
+
   useEffect(() => {
     refreshWorkspace();
   }, [refreshWorkspace]);
@@ -74,6 +89,8 @@ function App() {
             selectedRouter={selectedRouter}
             onSelectRouter={setSelectedRouterId}
             onRemoveRouter={handleRemoveRouter}
+            onTestRouter={handleTestRouter}
+            onSyncWireGuard={handleSyncWireGuard}
             onOpenRouterRegistration={() => setActiveView("routers")}
           />
         </div>

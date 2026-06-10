@@ -1,7 +1,46 @@
-import { Plus, Router, ShieldCheck, Trash2 } from "lucide-react";
+import { CircleAlert, CircleCheck, Clock3, Plus, RefreshCw, Router, ShieldCheck, Trash2, Unplug } from "lucide-react";
 import StatusPill from "../../shared/ui/StatusPill.jsx";
+import { useState } from "react";
 
-function OperationsPanel({ routers, selectedRouter, onSelectRouter, onRemoveRouter, onOpenRouterRegistration }) {
+const statusMap = {
+  online: { label: "Online", tone: "mint", icon: CircleCheck },
+  offline: { label: "Offline", tone: "danger", icon: CircleAlert },
+  pending_connection: { label: "Pendiente", tone: "amber", icon: Clock3 }
+};
+
+function OperationsPanel({
+  routers,
+  selectedRouter,
+  onSelectRouter,
+  onRemoveRouter,
+  onTestRouter,
+  onSyncWireGuard,
+  onOpenRouterRegistration
+}) {
+  const [actionState, setActionState] = useState({ type: "idle", message: "" });
+  const [busyAction, setBusyAction] = useState(null);
+
+  async function runRouterAction(actionName, callback) {
+    if (!selectedRouter) {
+      return;
+    }
+
+    setBusyAction(actionName);
+    setActionState({ type: "idle", message: "" });
+
+    try {
+      await callback(selectedRouter.id);
+      setActionState({
+        type: "success",
+        message: actionName === "sync" ? "Sincronizacion WireGuard finalizada." : "Conexion validada correctamente."
+      });
+    } catch (error) {
+      setActionState({ type: "error", message: error.message || "No se pudo completar la accion." });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   return (
     <aside className="space-y-5">
       <div className="rounded-lg border border-warm-line bg-warm-panel p-4 shadow-soft">
@@ -29,6 +68,7 @@ function OperationsPanel({ routers, selectedRouter, onSelectRouter, onRemoveRout
                   <span className="block truncate font-semibold">{router.alias}</span>
                   <span className="block truncate text-xs text-warm-muted">{router.host}:{router.apiPort}</span>
                 </span>
+                <RouterStatus status={router.status} />
               </button>
             ))}
           </div>
@@ -44,7 +84,37 @@ function OperationsPanel({ routers, selectedRouter, onSelectRouter, onRemoveRout
           <div className="mt-3 space-y-3 text-sm text-[#f5ead9]">
             <p className="font-semibold text-white">{selectedRouter.alias}</p>
             <p>{selectedRouter.authType === "token" ? "Token API cifrado localmente." : "Clave cifrada localmente."}</p>
-            <p>Estado: pendiente de validar conexion.</p>
+            <p>Estado: {statusMap[selectedRouter.status]?.label || selectedRouter.status}</p>
+            {selectedRouter.routerIdentity && <p>Identidad: {selectedRouter.routerIdentity}</p>}
+            {selectedRouter.routerVersion && <p>RouterOS: {selectedRouter.routerVersion}</p>}
+            {selectedRouter.lastSeenAt && <p>Ultimo contacto: {formatDate(selectedRouter.lastSeenAt)}</p>}
+            {selectedRouter.lastSyncAt && <p>Ultima lectura WG: {formatDate(selectedRouter.lastSyncAt)}</p>}
+            {selectedRouter.lastError && <p className="text-[#ffd1c3]">Error: {selectedRouter.lastError}</p>}
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                className="secondary-dark-button"
+                disabled={Boolean(busyAction)}
+                onClick={() => runRouterAction("test", onTestRouter)}
+                type="button"
+              >
+                <Unplug size={16} />
+                {busyAction === "test" ? "Probando" : "Probar conexion"}
+              </button>
+              <button
+                className="secondary-dark-button"
+                disabled={Boolean(busyAction)}
+                onClick={() => runRouterAction("sync", onSyncWireGuard)}
+                type="button"
+              >
+                <RefreshCw size={16} />
+                {busyAction === "sync" ? "Sincronizando" : "Sincronizar WireGuard"}
+              </button>
+            </div>
+            {actionState.message && (
+              <div className={`dark-message ${actionState.type === "error" ? "dark-message-error" : "dark-message-success"}`}>
+                {actionState.message}
+              </div>
+            )}
             <button
               className="danger-button"
               onClick={() => onRemoveRouter(selectedRouter.id)}
@@ -66,6 +136,24 @@ function OperationsPanel({ routers, selectedRouter, onSelectRouter, onRemoveRout
       </div>
     </aside>
   );
+}
+
+function RouterStatus({ status }) {
+  const config = statusMap[status] || statusMap.pending_connection;
+  const Icon = config.icon;
+
+  return (
+    <span className={`router-status router-status-${config.tone}`}>
+      <Icon size={13} />
+    </span>
+  );
+}
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat("es-PE", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(new Date(value));
 }
 
 export default OperationsPanel;

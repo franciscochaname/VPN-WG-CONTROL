@@ -1,8 +1,9 @@
 const { safeStorage } = require("electron");
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
+const { fetchWireGuardState, testRouterConnection } = require("./routerosClient.cjs");
 
 let db;
 
@@ -27,6 +28,10 @@ function initializeDatabase(userDataPath) {
       monitor_wireguard INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'pending_connection',
       last_seen_at TEXT,
+      last_error TEXT,
+      router_identity TEXT,
+      router_version TEXT,
+      last_sync_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -56,13 +61,19 @@ function initializeDatabase(userDataPath) {
       created_at TEXT NOT NULL,
       FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE SET NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_tuneles_router_id ON tb_tuneles(router_id);
+    CREATE INDEX IF NOT EXISTS idx_logs_router_id ON tb_logs_eventos(router_id);
   `);
+  runMigrations();
 }
 
 function registerRouterHandlers(ipcMain) {
   ipcMain.handle("routers:list", () => listRouters());
   ipcMain.handle("routers:create", (_event, payload) => createRouter(payload));
   ipcMain.handle("routers:remove", (_event, routerId) => removeRouter(routerId));
+  ipcMain.handle("routers:test-connection", (_event, routerId) => testConnection(routerId));
+  ipcMain.handle("routers:sync-wireguard", (_event, routerId) => syncWireGuard(routerId));
   ipcMain.handle("dashboard:snapshot", () => getDashboardSnapshot());
 }
 
@@ -82,6 +93,10 @@ function listRouters() {
         r.monitor_wireguard AS monitorWireGuard,
         r.status,
         r.last_seen_at AS lastSeenAt,
+        r.last_error AS lastError,
+        r.router_identity AS routerIdentity,
+        r.router_version AS routerVersion,
+        r.last_sync_at AS lastSyncAt,
         r.created_at AS createdAt,
         r.updated_at AS updatedAt,
         COUNT(t.id) AS tunnelCount
@@ -152,6 +167,67 @@ function removeRouter(routerId) {
   return { ok: true };
 }
 
+async function testConnection(routerId) {
+  assertDatabase();
+  const router = getRouterWithSecret(routerId);
+
+  try {
+    const result = await testRouterConnection(toConnectionConfig(router));
+    const now = new Date().toISOString();
+    const identity = result.identity?.name || null;
+    const version = result.resource?.version || null;
+
+    db.prepare(`
+      UPDATE tb_config_router
+      SET status = 'online',
+          last_seen_at = ?,
+          last_error = NULL,
+          router_identity = ?,
+          router_version = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(now, identity, version, now, routerId);
+
+    insertLog(routerId, "routeros-api", "info", "Conexion API validada correctamente.");
+    return listRouters().find((item) => item.id === routerId);
+  } catch (error) {
+    markRouterOffline(routerId, error.message);
+    throw error;
+  }
+}
+
+async function syncWireGuard(routerId) {
+  assertDatabase();
+  const router = getRouterWithSecret(routerId);
+
+  if (!router.monitorWireGuard) {
+    throw new Error("El monitoreo WireGuard no esta habilitado para este router.");
+  }
+
+  try {
+    const state = await fetchWireGuardState(toConnectionConfig(router));
+    const now = new Date().toISOString();
+
+    replaceWireGuardTunnels(routerId, state, now);
+
+    db.prepare(`
+      UPDATE tb_config_router
+      SET status = 'online',
+          last_seen_at = ?,
+          last_error = NULL,
+          last_sync_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(now, now, now, routerId);
+
+    insertLog(routerId, "wireguard-sync", "info", `Sincronizacion WireGuard finalizada: ${state.peers.length} peers leidos.`);
+    return getDashboardSnapshot();
+  } catch (error) {
+    markRouterOffline(routerId, error.message);
+    throw error;
+  }
+}
+
 function getDashboardSnapshot() {
   assertDatabase();
   const routers = listRouters();
@@ -164,9 +240,140 @@ function getDashboardSnapshot() {
       routers: routers.length,
       tunnels: tunnelCount,
       events: eventCount,
-      pendingConnections: routers.filter((router) => router.status === "pending_connection").length
+      pendingConnections: routers.filter((router) => router.status === "pending_connection").length,
+      onlineRouters: routers.filter((router) => router.status === "online").length,
+      offlineRouters: routers.filter((router) => router.status === "offline").length
     }
   };
+}
+
+function getRouterWithSecret(routerId) {
+  if (!routerId || typeof routerId !== "string") {
+    throw new Error("Router invalido.");
+  }
+
+  const router = db
+    .prepare(`
+      SELECT
+        id,
+        alias,
+        host,
+        api_port AS apiPort,
+        username,
+        auth_type AS authType,
+        secret_encrypted AS secretEncrypted,
+        use_tls AS useTls,
+        monitor_wireguard AS monitorWireGuard,
+        status
+      FROM tb_config_router
+      WHERE id = ?
+    `)
+    .get(routerId);
+
+  if (!router) {
+    throw new Error("Router no encontrado.");
+  }
+
+  return {
+    ...router,
+    useTls: Boolean(router.useTls),
+    monitorWireGuard: Boolean(router.monitorWireGuard),
+    secret: decryptSecret(router.secretEncrypted)
+  };
+}
+
+function toConnectionConfig(router) {
+  return {
+    host: router.host,
+    port: router.apiPort,
+    username: router.username,
+    password: router.secret,
+    useTls: router.useTls
+  };
+}
+
+function replaceWireGuardTunnels(routerId, state, now) {
+  const interfaceNames = new Set(state.interfaces.map((item) => item.name).filter(Boolean));
+  const rows = state.peers.map((peer) => {
+    const interfaceName = peer.interface || peer["interface-name"] || "wireguard";
+    return {
+      id: createTunnelId(routerId, interfaceName, peer["public-key"] || "", peer["allowed-address"] || ""),
+      routerId,
+      interfaceName,
+      peerPublicKey: peer["public-key"] || null,
+      allowedAddress: peer["allowed-address"] || null,
+      endpoint: buildEndpoint(peer),
+      lastHandshakeAt: peer["last-handshake"] || null,
+      rxBytes: toInteger(peer.rx),
+      txBytes: toInteger(peer.tx),
+      status: peer.disabled === "true" ? "disabled" : "known",
+      createdAt: now,
+      updatedAt: now
+    };
+  });
+
+  if (rows.length === 0 && interfaceNames.size > 0) {
+    for (const interfaceName of interfaceNames) {
+      rows.push({
+        id: createTunnelId(routerId, interfaceName, "", ""),
+        routerId,
+        interfaceName,
+        peerPublicKey: null,
+        allowedAddress: null,
+        endpoint: null,
+        lastHandshakeAt: null,
+        rxBytes: 0,
+        txBytes: 0,
+        status: "interface_only",
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+  }
+
+  const deleteStatement = db.prepare("DELETE FROM tb_tuneles WHERE router_id = ?");
+  const insertStatement = db.prepare(`
+    INSERT INTO tb_tuneles (
+      id,
+      router_id,
+      interface_name,
+      peer_public_key,
+      allowed_address,
+      endpoint,
+      last_handshake_at,
+      rx_bytes,
+      tx_bytes,
+      status,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  db.exec("BEGIN");
+  try {
+    deleteStatement.run(routerId);
+    for (const row of rows) {
+      insertStatement.run(
+        row.id,
+        row.routerId,
+        row.interfaceName,
+        row.peerPublicKey,
+        row.allowedAddress,
+        row.endpoint,
+        row.lastHandshakeAt,
+        row.rxBytes,
+        row.txBytes,
+        row.status,
+        row.createdAt,
+        row.updatedAt
+      );
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function validateRouterPayload(payload = {}) {
@@ -217,6 +424,54 @@ function encryptSecret(secret) {
   return safeStorage.encryptString(secret).toString("base64");
 }
 
+function decryptSecret(secretEncrypted) {
+  return safeStorage.decryptString(Buffer.from(secretEncrypted, "base64"));
+}
+
+function markRouterOffline(routerId, message) {
+  const now = new Date().toISOString();
+  const cleanMessage = message || "Conexion fallida.";
+
+  db.prepare(`
+    UPDATE tb_config_router
+    SET status = 'offline',
+        last_error = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(cleanMessage, now, routerId);
+
+  insertLog(routerId, "routeros-api", "error", cleanMessage);
+}
+
+function insertLog(routerId, source, level, message) {
+  db.prepare(`
+    INSERT INTO tb_logs_eventos (id, router_id, source, level, message, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(randomUUID(), routerId, source, level, message, new Date().toISOString());
+}
+
+function buildEndpoint(peer) {
+  const address = peer["endpoint-address"];
+  const port = peer["endpoint-port"];
+
+  if (address && port) {
+    return `${address}:${port}`;
+  }
+
+  return address || null;
+}
+
+function createTunnelId(routerId, interfaceName, publicKey, allowedAddress) {
+  return createHash("sha256")
+    .update(`${routerId}:${interfaceName}:${publicKey}:${allowedAddress}`)
+    .digest("hex");
+}
+
+function toInteger(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -233,10 +488,29 @@ function normalizeRouterRow(row) {
     monitorWireGuard: Boolean(row.monitorWireGuard),
     status: row.status,
     lastSeenAt: row.lastSeenAt,
+    lastError: row.lastError,
+    routerIdentity: row.routerIdentity,
+    routerVersion: row.routerVersion,
+    lastSyncAt: row.lastSyncAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     tunnelCount: Number(row.tunnelCount || 0)
   };
+}
+
+function runMigrations() {
+  ensureColumn("tb_config_router", "last_error", "TEXT");
+  ensureColumn("tb_config_router", "router_identity", "TEXT");
+  ensureColumn("tb_config_router", "router_version", "TEXT");
+  ensureColumn("tb_config_router", "last_sync_at", "TEXT");
+}
+
+function ensureColumn(tableName, columnName, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+
+  if (!columns.some((column) => column.name === columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
 }
 
 function assertDatabase() {

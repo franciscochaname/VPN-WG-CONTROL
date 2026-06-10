@@ -45,6 +45,22 @@ export async function removeRouter(routerId) {
   return { ok: true };
 }
 
+export async function testRouterConnection(routerId) {
+  if (electronApi()?.routers) {
+    return electronApi().routers.testConnection(routerId);
+  }
+
+  throw new Error("La prueba de conexion solo esta disponible dentro de Electron.");
+}
+
+export async function syncWireGuard(routerId) {
+  if (electronApi()?.routers) {
+    return electronApi().routers.syncWireGuard(routerId);
+  }
+
+  throw new Error("La sincronizacion WireGuard solo esta disponible dentro de Electron.");
+}
+
 export async function getDashboardSnapshot() {
   if (electronApi()?.dashboard) {
     return electronApi().dashboard.snapshot();
