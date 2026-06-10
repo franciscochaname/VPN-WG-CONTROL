@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
+const { initializeDatabase, registerRouterHandlers } = require("./database.cjs");
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -26,6 +27,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  initializeDatabase(app.getPath("userData"));
+  registerRouterHandlers(ipcMain);
   ipcMain.handle("app:get-version", () => app.getVersion());
   createWindow();
 

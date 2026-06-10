@@ -41,6 +41,16 @@ npm.cmd install
 npm.cmd run dev
 ```
 
+## Persistencia local
+
+La aplicacion guarda su base SQLite en el perfil local de Electron:
+
+```text
+%APPDATA%/vpn-wg-control/data/vpn-wg-control.sqlite
+```
+
+Las credenciales del router no se devuelven al frontend. El token o clave se cifra desde Electron con `safeStorage` antes de persistirse.
+
 ## Registro de avances
 
 ### 2026-06-09
@@ -48,5 +58,13 @@ npm.cmd run dev
 - Se inicio el repositorio base.
 - Se definio direccion visual: modo claro calido, moderno, interactivo y limpio.
 - Se creo el scaffold Electron + React + Tailwind.
-- Se agrego dashboard inicial con topologia animada y datos simulados.
+- Se agrego dashboard inicial con topologia animada para la primera maqueta visual.
 - Se organizo el frontend por `app`, `features` y `shared/ui` para crecer por modulos sin reordenar archivos.
+
+### 2026-06-10
+
+- Se elimino la dependencia de datos inventados en el dashboard.
+- Se agrego registro real de routers Mikrotik con formulario de acceso API.
+- Se agrego persistencia local SQLite desde Electron.
+- Se agrego cifrado local de token/clave con `safeStorage` antes de guardar credenciales.
+- Se prepararon tablas base: `tb_config_router`, `tb_tuneles` y `tb_logs_eventos`.

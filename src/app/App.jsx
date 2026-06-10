@@ -1,19 +1,81 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Dashboard from "../features/dashboard/Dashboard.jsx";
 import Header from "../features/layout/Header.jsx";
 import OperationsPanel from "../features/layout/OperationsPanel.jsx";
 import Sidebar from "../features/layout/Sidebar.jsx";
+import RouterRegistration from "../features/routers/RouterRegistration.jsx";
+import { getDashboardSnapshot, removeRouter } from "../shared/api/routerStore.js";
 
 function App() {
+  const [activeView, setActiveView] = useState("dashboard");
+  const [routers, setRouters] = useState([]);
+  const [metrics, setMetrics] = useState({
+    routers: 0,
+    tunnels: 0,
+    events: 0,
+    pendingConnections: 0
+  });
+  const [selectedRouterId, setSelectedRouterId] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const selectedRouter = useMemo(
+    () => routers.find((router) => router.id === selectedRouterId) || routers[0] || null,
+    [routers, selectedRouterId]
+  );
+
+  const refreshWorkspace = useCallback(async function refreshWorkspace() {
+    setIsLoading(true);
+    try {
+      const snapshot = await getDashboardSnapshot();
+      setRouters(snapshot.routers);
+      setMetrics(snapshot.metrics);
+      setSelectedRouterId((currentId) => {
+        if (snapshot.routers.some((router) => router.id === currentId)) {
+          return currentId;
+        }
+
+        return snapshot.routers[0]?.id || null;
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  async function handleRemoveRouter(routerId) {
+    await removeRouter(routerId);
+    await refreshWorkspace();
+  }
+
+  useEffect(() => {
+    refreshWorkspace();
+  }, [refreshWorkspace]);
+
   return (
     <main className="min-h-screen overflow-hidden bg-warm-canvas text-warm-ink">
       <div className="pointer-events-none fixed inset-0 soft-grid" />
       <section className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-5 lg:px-8">
-        <Header />
+        <Header routerCount={metrics.routers} />
 
         <div className="grid flex-1 grid-cols-1 gap-5 py-5 lg:grid-cols-[260px_minmax(0,1fr)_310px]">
-          <Sidebar />
-          <Dashboard />
-          <OperationsPanel />
+          <Sidebar activeView={activeView} onNavigate={setActiveView} />
+          {activeView === "routers" ? (
+            <RouterRegistration onRouterCreated={refreshWorkspace} />
+          ) : (
+            <Dashboard
+              isLoading={isLoading}
+              metrics={metrics}
+              routers={routers}
+              selectedRouter={selectedRouter}
+              onOpenRouterRegistration={() => setActiveView("routers")}
+            />
+          )}
+          <OperationsPanel
+            routers={routers}
+            selectedRouter={selectedRouter}
+            onSelectRouter={setSelectedRouterId}
+            onRemoveRouter={handleRemoveRouter}
+            onOpenRouterRegistration={() => setActiveView("routers")}
+          />
         </div>
       </section>
     </main>

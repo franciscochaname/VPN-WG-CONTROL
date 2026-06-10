@@ -113,6 +113,11 @@ button {
   transform: translate(-50%, -54%);
 }
 
+.node-selected span:nth-child(2) {
+  outline: 2px solid #e5a23a;
+  outline-offset: 3px;
+}
+
 .node-router {
   animation: float 5s ease-in-out infinite;
 }
@@ -125,4 +130,124 @@ button {
   border-radius: 999px;
   opacity: 0.24;
   animation: pulseSoft 2.6s ease-in-out infinite;
+}
+
+.router-list-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 10px;
+  transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.router-list-item:hover,
+.router-list-item-active {
+  transform: translateY(-1px);
+  border-color: #e5a23a;
+  background: #fffdf8;
+}
+
+.field-label {
+  display: grid;
+  gap: 8px;
+  color: #73695f;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.field-input {
+  min-height: 43px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: #2a2520;
+  font-size: 0.95rem;
+  font-weight: 600;
+  outline: none;
+  padding: 10px 12px;
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.field-input:focus {
+  border-color: #e5a23a;
+  box-shadow: 0 0 0 3px rgba(229, 162, 58, 0.18);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  color: #73695f;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.45;
+  padding: 12px;
+}
+
+.toggle-row input {
+  height: 17px;
+  width: 17px;
+  accent-color: #c66a38;
+}
+
+.primary-button,
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  transition: transform 180ms ease, background 180ms ease, opacity 180ms ease;
+}
+
+.primary-button {
+  background: #2a2520;
+  color: #fffdf8;
+  min-height: 43px;
+  padding: 0 15px;
+}
+
+.primary-button:hover,
+.danger-button:hover {
+  transform: translateY(-1px);
+}
+
+.primary-button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+  transform: none;
+}
+
+.danger-button {
+  width: 100%;
+  background: rgba(255, 253, 248, 0.08);
+  color: #fffdf8;
+  min-height: 40px;
+}
+
+.form-message {
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 12px;
+}
+
+.form-message-error {
+  background: #fff1ed;
+  color: #a94727;
+}
+
+.form-message-success {
+  background: #edf5ef;
+  color: #3d7c66;
 }

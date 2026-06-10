@@ -1,7 +1,7 @@
 import { Bell, ShieldCheck } from "lucide-react";
 import StatusPill from "../../shared/ui/StatusPill.jsx";
 
-function Header() {
+function Header({ routerCount }) {
   return (
     <header className="flex items-center justify-between border-b border-warm-line/80 pb-4">
       <div className="flex items-center gap-3">
@@ -17,8 +17,8 @@ function Header() {
       </div>
 
       <div className="flex items-center gap-3">
-        <StatusPill label="Webhook listo" tone="mint" />
-        <StatusPill label="Mikrotik API" tone="amber" />
+        <StatusPill label={`${routerCount} routers`} tone={routerCount > 0 ? "mint" : "neutral"} />
+        <StatusPill label="Base local" tone="amber" />
         <button className="icon-button" aria-label="Notificaciones">
           <Bell size={20} />
         </button>

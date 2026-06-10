@@ -1,19 +1,28 @@
-import { navigationItems } from "../dashboard/dashboardData.js";
+import { KeyRound, LayoutDashboard, Network, Router, ShieldCheck } from "lucide-react";
 
-function Sidebar() {
+const navigationItems = [
+  { id: "dashboard", label: "Panel", icon: LayoutDashboard },
+  { id: "routers", label: "Routers", icon: Router },
+  { id: "topology", label: "Topologia", icon: Network },
+  { id: "security", label: "Seguridad", icon: ShieldCheck },
+  { id: "keys", label: "Llaves WG", icon: KeyRound }
+];
+
+function Sidebar({ activeView, onNavigate }) {
   return (
     <aside className="rounded-lg border border-warm-line bg-warm-panel/82 p-3 shadow-soft backdrop-blur">
       <div className="mb-4 rounded-lg bg-[#f3eadc] p-3">
         <p className="text-sm font-semibold">Despliegue por fases</p>
         <p className="mt-1 text-xs leading-5 text-warm-muted">
-          Base visual lista para conectar SQLite, API Mikrotik y escucha pasiva sin reordenar el proyecto.
+          Registro real de routers primero. Monitoreo, tuneles y eventos se activan sobre datos guardados por el usuario.
         </p>
       </div>
       <nav className="space-y-1">
         {navigationItems.map((item) => (
           <button
             key={item.label}
-            className={`nav-item ${item.active ? "nav-item-active" : ""}`}
+            className={`nav-item ${activeView === item.id ? "nav-item-active" : ""}`}
+            onClick={() => onNavigate(item.id)}
             type="button"
           >
             <item.icon size={18} />
