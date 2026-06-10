@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1080px;
+  background: #fbf7ef;
+}
+
+button {
+  font: inherit;
+}
+
+.soft-grid {
+  background-image:
+    linear-gradient(rgba(198, 106, 56, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(198, 106, 56, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at 18% 12%, rgba(229, 162, 58, 0.18), transparent 28%),
+    radial-gradient(circle at 82% 8%, rgba(77, 144, 120, 0.14), transparent 26%);
+  background-size: 34px 34px, 34px 34px, 100% 100%, 100% 100%;
+}
+
+.icon-button {
+  display: grid;
+  height: 42px;
+  width: 42px;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: rgba(255, 253, 248, 0.86);
+  color: #2a2520;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.icon-button:hover {
+  transform: translateY(-1px);
+  border-color: #e5a23a;
+  background: #fffdf8;
+}
+
+.nav-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: #73695f;
+  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.nav-item:hover,
+.nav-item-active {
+  background: #f4ead9;
+  color: #2a2520;
+  transform: translateX(2px);
+}
+
+.action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  padding: 9px 11px;
+  color: #2a2520;
+  font-size: 0.84rem;
+  font-weight: 700;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.action-button:hover {
+  transform: translateY(-1px);
+  border-color: #e5a23a;
+  box-shadow: 0 10px 25px rgba(76, 54, 32, 0.1);
+}
+
+.topology-line {
+  stroke: rgba(115, 105, 95, 0.22);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.topology-flow {
+  stroke: #c66a38;
+  stroke-width: 1.25;
+  stroke-dasharray: 7 10;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  animation: flow 1.8s linear infinite;
+}
+
+.node-marker {
+  position: absolute;
+  display: flex;
+  width: 150px;
+  transform: translate(-50%, -50%);
+  flex-direction: column;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: #2a2520;
+  transition: transform 200ms ease;
+}
+
+.node-marker:hover {
+  transform: translate(-50%, -54%);
+}
+
+.node-router {
+  animation: float 5s ease-in-out infinite;
+}
+
+.node-pulse {
+  position: absolute;
+  top: 13px;
+  height: 48px;
+  width: 48px;
+  border-radius: 999px;
+  opacity: 0.24;
+  animation: pulseSoft 2.6s ease-in-out infinite;
+}
