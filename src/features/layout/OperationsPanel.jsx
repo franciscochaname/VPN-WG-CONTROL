@@ -1,4 +1,15 @@
-import { CircleAlert, CircleCheck, Clock3, Plus, RefreshCw, Router, ShieldCheck, Trash2, Unplug } from "lucide-react";
+import {
+  CircleAlert,
+  CircleCheck,
+  Clock3,
+  Network,
+  Plus,
+  RefreshCw,
+  Router,
+  ShieldCheck,
+  Trash2,
+  Unplug
+} from "lucide-react";
 import StatusPill from "../../shared/ui/StatusPill.jsx";
 import { useState } from "react";
 
@@ -15,6 +26,7 @@ function OperationsPanel({
   onRemoveRouter,
   onTestRouter,
   onSyncWireGuard,
+  onDiagnoseRouter,
   onOpenRouterRegistration
 }) {
   const [actionState, setActionState] = useState({ type: "idle", message: "" });
@@ -32,7 +44,11 @@ function OperationsPanel({
       await callback(selectedRouter.id);
       setActionState({
         type: "success",
-        message: actionName === "sync" ? "Sincronizacion WireGuard finalizada." : "Conexion validada correctamente."
+        message: actionName === "sync"
+          ? "Sincronizacion WireGuard finalizada."
+          : actionName === "diagnose"
+            ? "Diagnostico de servicios finalizado."
+            : "Conexion validada correctamente."
       });
     } catch (error) {
       setActionState({ type: "error", message: error.message || "No se pudo completar la accion." });
@@ -66,7 +82,7 @@ function OperationsPanel({
                 </span>
                 <span className="min-w-0 flex-1 text-left">
                   <span className="block truncate font-semibold">{router.alias}</span>
-                  <span className="block truncate text-xs text-warm-muted">{router.host}:{router.apiPort}</span>
+                  <span className="block truncate text-xs text-warm-muted">API {router.host}:{router.apiPort}</span>
                 </span>
                 <RouterStatus status={router.status} />
               </button>
@@ -84,6 +100,8 @@ function OperationsPanel({
           <div className="mt-3 space-y-3 text-sm text-[#f5ead9]">
             <p className="font-semibold text-white">{selectedRouter.alias}</p>
             <p>{selectedRouter.authType === "token" ? "Token API cifrado localmente." : "Clave cifrada localmente."}</p>
+            <p>API: {selectedRouter.host}:{selectedRouter.apiPort}</p>
+            <p>WebFig: {selectedRouter.webfigTls ? "https" : "http"}://{selectedRouter.host}:{selectedRouter.webfigPort}</p>
             <p>Estado: {statusMap[selectedRouter.status]?.label || selectedRouter.status}</p>
             {selectedRouter.routerIdentity && <p>Identidad: {selectedRouter.routerIdentity}</p>}
             {selectedRouter.routerVersion && <p>RouterOS: {selectedRouter.routerVersion}</p>}
@@ -91,6 +109,15 @@ function OperationsPanel({
             {selectedRouter.lastSyncAt && <p>Ultima lectura WG: {formatDate(selectedRouter.lastSyncAt)}</p>}
             {selectedRouter.lastError && <p className="text-[#ffd1c3]">Error: {selectedRouter.lastError}</p>}
             <div className="grid grid-cols-1 gap-2">
+              <button
+                className="secondary-dark-button"
+                disabled={Boolean(busyAction)}
+                onClick={() => runRouterAction("diagnose", onDiagnoseRouter)}
+                type="button"
+              >
+                <Network size={16} />
+                {busyAction === "diagnose" ? "Diagnosticando" : "Diagnosticar servicios"}
+              </button>
               <button
                 className="secondary-dark-button"
                 disabled={Boolean(busyAction)}
@@ -113,6 +140,20 @@ function OperationsPanel({
             {actionState.message && (
               <div className={`dark-message ${actionState.type === "error" ? "dark-message-error" : "dark-message-success"}`}>
                 {actionState.message}
+              </div>
+            )}
+            {selectedRouter.diagnostics?.length > 0 && (
+              <div className="service-diagnostics">
+                {selectedRouter.diagnostics.map((item) => (
+                  <div className="service-row" key={item.key}>
+                    <span className={`service-dot service-dot-${item.status}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">{item.label}</span>
+                      <span className="block truncate text-xs text-[#d8c8b5]">{item.protocol} {item.port} · {item.status}</span>
+                    </span>
+                    <span className="text-xs text-[#d8c8b5]">{item.latencyMs}ms</span>
+                  </div>
+                ))}
               </div>
             )}
             <button

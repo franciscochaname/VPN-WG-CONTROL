@@ -4,7 +4,13 @@ import Header from "../features/layout/Header.jsx";
 import OperationsPanel from "../features/layout/OperationsPanel.jsx";
 import Sidebar from "../features/layout/Sidebar.jsx";
 import RouterRegistration from "../features/routers/RouterRegistration.jsx";
-import { getDashboardSnapshot, removeRouter, syncWireGuard, testRouterConnection } from "../shared/api/routerStore.js";
+import {
+  diagnoseRouterServices,
+  getDashboardSnapshot,
+  removeRouter,
+  syncWireGuard,
+  testRouterConnection
+} from "../shared/api/routerStore.js";
 
 function App() {
   const [activeView, setActiveView] = useState("dashboard");
@@ -61,6 +67,12 @@ function App() {
     return snapshot;
   }
 
+  async function handleDiagnoseRouter(routerId) {
+    const result = await diagnoseRouterServices(routerId);
+    await refreshWorkspace();
+    return result;
+  }
+
   useEffect(() => {
     refreshWorkspace();
   }, [refreshWorkspace]);
@@ -91,6 +103,7 @@ function App() {
             onRemoveRouter={handleRemoveRouter}
             onTestRouter={handleTestRouter}
             onSyncWireGuard={handleSyncWireGuard}
+            onDiagnoseRouter={handleDiagnoseRouter}
             onOpenRouterRegistration={() => setActiveView("routers")}
           />
         </div>

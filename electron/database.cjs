@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const { fetchWireGuardState, testRouterConnection } = require("./routerosClient.cjs");
+const { diagnoseRouterServices } = require("./serviceDiagnostics.cjs");
 
 let db;
 
@@ -21,6 +22,8 @@ function initializeDatabase(userDataPath) {
       alias TEXT NOT NULL,
       host TEXT NOT NULL,
       api_port INTEGER NOT NULL DEFAULT 8728,
+      webfig_port INTEGER NOT NULL DEFAULT 8443,
+      webfig_tls INTEGER NOT NULL DEFAULT 1,
       username TEXT NOT NULL,
       auth_type TEXT NOT NULL DEFAULT 'token',
       secret_encrypted TEXT NOT NULL,
@@ -62,8 +65,24 @@ function initializeDatabase(userDataPath) {
       FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS tb_diagnosticos (
+      id TEXT PRIMARY KEY,
+      router_id TEXT NOT NULL,
+      service_key TEXT NOT NULL,
+      service_label TEXT NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER NOT NULL,
+      protocol TEXT NOT NULL,
+      status TEXT NOT NULL,
+      detail TEXT,
+      latency_ms INTEGER,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tuneles_router_id ON tb_tuneles(router_id);
     CREATE INDEX IF NOT EXISTS idx_logs_router_id ON tb_logs_eventos(router_id);
+    CREATE INDEX IF NOT EXISTS idx_diagnosticos_router_id ON tb_diagnosticos(router_id);
   `);
   runMigrations();
 }
@@ -74,6 +93,7 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("routers:remove", (_event, routerId) => removeRouter(routerId));
   ipcMain.handle("routers:test-connection", (_event, routerId) => testConnection(routerId));
   ipcMain.handle("routers:sync-wireguard", (_event, routerId) => syncWireGuard(routerId));
+  ipcMain.handle("routers:diagnose-services", (_event, routerId) => diagnoseServices(routerId));
   ipcMain.handle("dashboard:snapshot", () => getDashboardSnapshot());
 }
 
@@ -87,6 +107,8 @@ function listRouters() {
         r.alias,
         r.host,
         r.api_port AS apiPort,
+        r.webfig_port AS webfigPort,
+        r.webfig_tls AS webfigTls,
         r.username,
         r.auth_type AS authType,
         r.use_tls AS useTls,
@@ -99,9 +121,11 @@ function listRouters() {
         r.last_sync_at AS lastSyncAt,
         r.created_at AS createdAt,
         r.updated_at AS updatedAt,
-        COUNT(t.id) AS tunnelCount
+        COUNT(DISTINCT t.id) AS tunnelCount,
+        MAX(d.created_at) AS lastDiagnosticAt
       FROM tb_config_router r
       LEFT JOIN tb_tuneles t ON t.router_id = r.id
+      LEFT JOIN tb_diagnosticos d ON d.router_id = r.id
       GROUP BY r.id
       ORDER BY r.created_at DESC
     `)
@@ -128,6 +152,8 @@ function createRouter(payload) {
       alias,
       host,
       api_port,
+      webfig_port,
+      webfig_tls,
       username,
       auth_type,
       secret_encrypted,
@@ -137,12 +163,14 @@ function createRouter(payload) {
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     router.id,
     router.alias,
     router.host,
     router.apiPort,
+    router.webfigPort,
+    router.webfigTls ? 1 : 0,
     router.username,
     router.authType,
     router.secretEncrypted,
@@ -154,6 +182,69 @@ function createRouter(payload) {
   );
 
   return listRouters().find((item) => item.id === router.id);
+}
+
+async function diagnoseServices(routerId) {
+  assertDatabase();
+  const router = getRouterWithSecret(routerId);
+  const results = await diagnoseRouterServices(router);
+  const now = new Date().toISOString();
+  const deleteStatement = db.prepare("DELETE FROM tb_diagnosticos WHERE router_id = ?");
+  const insertStatement = db.prepare(`
+    INSERT INTO tb_diagnosticos (
+      id,
+      router_id,
+      service_key,
+      service_label,
+      host,
+      port,
+      protocol,
+      status,
+      detail,
+      latency_ms,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  db.exec("BEGIN");
+  try {
+    deleteStatement.run(routerId);
+    for (const result of results) {
+      insertStatement.run(
+        randomUUID(),
+        routerId,
+        result.key,
+        result.label,
+        result.host,
+        result.port,
+        result.protocol,
+        result.status,
+        result.detail,
+        result.latencyMs,
+        now
+      );
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  const openServices = results.filter((result) => result.status === "open").map((result) => `${result.label}:${result.port}`);
+  insertLog(
+    routerId,
+    "service-diagnostics",
+    openServices.length > 0 ? "info" : "warning",
+    openServices.length > 0
+      ? `Diagnostico finalizado. Servicios abiertos: ${openServices.join(", ")}.`
+      : "Diagnostico finalizado sin servicios abiertos."
+  );
+
+  return {
+    router: listRouters().find((item) => item.id === routerId),
+    diagnostics: getLatestDiagnostics(routerId)
+  };
 }
 
 function removeRouter(routerId) {
@@ -262,6 +353,8 @@ function getRouterWithSecret(routerId) {
         username,
         auth_type AS authType,
         secret_encrypted AS secretEncrypted,
+        webfig_port AS webfigPort,
+        webfig_tls AS webfigTls,
         use_tls AS useTls,
         monitor_wireguard AS monitorWireGuard,
         status
@@ -277,6 +370,7 @@ function getRouterWithSecret(routerId) {
   return {
     ...router,
     useTls: Boolean(router.useTls),
+    webfigTls: Boolean(router.webfigTls),
     monitorWireGuard: Boolean(router.monitorWireGuard),
     secret: decryptSecret(router.secretEncrypted)
   };
@@ -382,6 +476,7 @@ function validateRouterPayload(payload = {}) {
   const username = cleanText(payload.username);
   const secret = typeof payload.secret === "string" ? payload.secret.trim() : "";
   const apiPort = Number(payload.apiPort || 8728);
+  const webfigPort = Number(payload.webfigPort || 8443);
   const authType = payload.authType === "password" ? "password" : "token";
 
   if (!alias) {
@@ -396,6 +491,10 @@ function validateRouterPayload(payload = {}) {
     throw new Error("El puerto API debe estar entre 1 y 65535.");
   }
 
+  if (!Number.isInteger(webfigPort) || webfigPort < 1 || webfigPort > 65535) {
+    throw new Error("El puerto WebFig debe estar entre 1 y 65535.");
+  }
+
   if (!username) {
     throw new Error("Ingresa el usuario API del router.");
   }
@@ -408,10 +507,12 @@ function validateRouterPayload(payload = {}) {
     alias,
     host,
     apiPort,
+    webfigPort,
     username,
     secret,
     authType,
     useTls: Boolean(payload.useTls),
+    webfigTls: payload.webfigTls !== false,
     monitorWireGuard: payload.monitorWireGuard !== false
   };
 }
@@ -482,6 +583,8 @@ function normalizeRouterRow(row) {
     alias: row.alias,
     host: row.host,
     apiPort: row.apiPort,
+    webfigPort: row.webfigPort,
+    webfigTls: Boolean(row.webfigTls),
     username: row.username,
     authType: row.authType,
     useTls: Boolean(row.useTls),
@@ -494,15 +597,39 @@ function normalizeRouterRow(row) {
     lastSyncAt: row.lastSyncAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-    tunnelCount: Number(row.tunnelCount || 0)
+    tunnelCount: Number(row.tunnelCount || 0),
+    lastDiagnosticAt: row.lastDiagnosticAt,
+    diagnostics: getLatestDiagnostics(row.id)
   };
 }
 
 function runMigrations() {
+  ensureColumn("tb_config_router", "webfig_port", "INTEGER NOT NULL DEFAULT 8443");
+  ensureColumn("tb_config_router", "webfig_tls", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn("tb_config_router", "last_error", "TEXT");
   ensureColumn("tb_config_router", "router_identity", "TEXT");
   ensureColumn("tb_config_router", "router_version", "TEXT");
   ensureColumn("tb_config_router", "last_sync_at", "TEXT");
+}
+
+function getLatestDiagnostics(routerId) {
+  return db
+    .prepare(`
+      SELECT
+        service_key AS key,
+        service_label AS label,
+        host,
+        port,
+        protocol,
+        status,
+        detail,
+        latency_ms AS latencyMs,
+        created_at AS createdAt
+      FROM tb_diagnosticos
+      WHERE router_id = ?
+      ORDER BY service_label
+    `)
+    .all(routerId);
 }
 
 function ensureColumn(tableName, columnName, definition) {

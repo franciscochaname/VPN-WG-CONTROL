@@ -275,6 +275,40 @@ button {
   transform: none;
 }
 
+.service-diagnostics {
+  display: grid;
+  gap: 7px;
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.08);
+  padding: 9px;
+}
+
+.service-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.service-dot {
+  height: 9px;
+  width: 9px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.service-dot-open {
+  background: #8ed6ad;
+}
+
+.service-dot-timeout {
+  background: #e5a23a;
+}
+
+.service-dot-closed {
+  background: #e98b73;
+}
+
 .form-message {
   border-radius: 8px;
   font-size: 0.9rem;

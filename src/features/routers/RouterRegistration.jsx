@@ -6,10 +6,12 @@ const initialForm = {
   alias: "",
   host: "",
   apiPort: "8728",
+  webfigPort: "8443",
   username: "",
   authType: "token",
   secret: "",
   useTls: false,
+  webfigTls: true,
   monitorWireGuard: true
 };
 
@@ -92,6 +94,19 @@ function RouterRegistration({ onRouterCreated }) {
           </label>
 
           <label className="field-label">
+            Puerto WebFig
+            <input
+              className="field-input"
+              max="65535"
+              min="1"
+              onChange={(event) => updateField("webfigPort", event.target.value)}
+              required
+              type="number"
+              value={form.webfigPort}
+            />
+          </label>
+
+          <label className="field-label">
             Usuario API
             <input
               className="field-input"
@@ -146,6 +161,15 @@ function RouterRegistration({ onRouterCreated }) {
               type="checkbox"
             />
             <span>Usar API TLS si el router lo tiene habilitado</span>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              checked={form.webfigTls}
+              onChange={(event) => updateField("webfigTls", event.target.checked)}
+              type="checkbox"
+            />
+            <span>WebFig usa HTTPS</span>
           </label>
 
           <label className="toggle-row">

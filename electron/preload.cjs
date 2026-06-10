@@ -7,7 +7,8 @@ contextBridge.exposeInMainWorld("vpnWgControl", {
     create: (payload) => ipcRenderer.invoke("routers:create", payload),
     remove: (routerId) => ipcRenderer.invoke("routers:remove", routerId),
     testConnection: (routerId) => ipcRenderer.invoke("routers:test-connection", routerId),
-    syncWireGuard: (routerId) => ipcRenderer.invoke("routers:sync-wireguard", routerId)
+    syncWireGuard: (routerId) => ipcRenderer.invoke("routers:sync-wireguard", routerId),
+    diagnoseServices: (routerId) => ipcRenderer.invoke("routers:diagnose-services", routerId)
   },
   dashboard: {
     snapshot: () => ipcRenderer.invoke("dashboard:snapshot")

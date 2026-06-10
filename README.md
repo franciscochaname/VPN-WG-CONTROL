@@ -73,3 +73,6 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego lectura real de identidad y version RouterOS cuando la conexion responde.
 - Se agrego sincronizacion WireGuard desde `/interface/wireguard/print` y `/interface/wireguard/peers/print`.
 - Se agrego registro local de errores/eventos tecnicos en `tb_logs_eventos`.
+- Se agrego configuracion de puerto WebFig por router.
+- Se agrego diagnostico real de servicios Mikrotik: API, API-SSL, Winbox, WebFig, HTTP y HTTPS.
+- Se agrego persistencia de diagnosticos en `tb_diagnosticos`.

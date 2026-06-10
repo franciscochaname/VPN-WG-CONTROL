@@ -21,15 +21,18 @@ export async function createRouter(payload) {
     alias: payload.alias.trim(),
     host: payload.host.trim(),
     apiPort: Number(payload.apiPort || 8728),
+    webfigPort: Number(payload.webfigPort || 8443),
     username: payload.username.trim(),
     authType: payload.authType,
     useTls: Boolean(payload.useTls),
+    webfigTls: payload.webfigTls !== false,
     monitorWireGuard: payload.monitorWireGuard !== false,
     status: "pending_connection",
     lastSeenAt: null,
     createdAt: now,
     updatedAt: now,
-    tunnelCount: 0
+    tunnelCount: 0,
+    diagnostics: []
   };
 
   browserRouters = [router, ...browserRouters];
@@ -59,6 +62,14 @@ export async function syncWireGuard(routerId) {
   }
 
   throw new Error("La sincronizacion WireGuard solo esta disponible dentro de Electron.");
+}
+
+export async function diagnoseRouterServices(routerId) {
+  if (electronApi()?.routers) {
+    return electronApi().routers.diagnoseServices(routerId);
+  }
+
+  throw new Error("El diagnostico de servicios solo esta disponible dentro de Electron.");
 }
 
 export async function getDashboardSnapshot() {
