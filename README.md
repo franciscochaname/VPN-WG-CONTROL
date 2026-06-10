@@ -82,3 +82,6 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego generador local de llaves WireGuard X25519 compatible con formato base64.
 - Se agrego persistencia de llaves privadas cifradas en `tb_wireguard_keys`.
 - Se agrego vista `Llaves WG` para generar, listar, copiar publicas y eliminar llaves locales.
+- Se agrego operacion real para crear peers WireGuard en RouterOS con `/interface/wireguard/peers/add`.
+- Se agrego formulario WireGuard para seleccionar llave publica de la boveda o ingresar una publica manual.
+- Se mantiene la regla de no crear peers locales si RouterOS no confirma la operacion.

@@ -118,6 +118,10 @@ class RouterOsClient {
         return sentences;
       }
 
+      if (sentence.reply === "!trap") {
+        throw new Error(extractTrapMessage([sentence]) || "RouterOS rechazo el comando.");
+      }
+
       if (sentence.reply === "!fatal") {
         throw new Error(extractTrapMessage([sentence]) || "Respuesta fatal del router.");
       }
@@ -254,6 +258,31 @@ async function fetchWireGuardState(config) {
   });
 }
 
+async function addWireGuardPeer(config, peer) {
+  return withRouterOsSession(config, async (client) => {
+    const words = [
+      "/interface/wireguard/peers/add",
+      `=interface=${peer.interfaceName}`,
+      `=public-key=${peer.publicKey}`,
+      `=allowed-address=${peer.allowedAddress}`
+    ];
+
+    addOptionalWord(words, "comment", peer.comment);
+    addOptionalWord(words, "endpoint-address", peer.endpointAddress);
+    addOptionalWord(words, "endpoint-port", peer.endpointPort);
+    addOptionalWord(words, "persistent-keepalive", peer.persistentKeepalive);
+
+    if (peer.disabled) {
+      words.push("=disabled=yes");
+    }
+
+    const response = await client.command(words);
+    return {
+      response: firstDoneAttributes(response)
+    };
+  });
+}
+
 function encodeLength(length) {
   if (length < 0x80) {
     return Buffer.from([length]);
@@ -304,6 +333,18 @@ function firstDataAttributes(sentences) {
   return dataAttributes(sentences)[0] || {};
 }
 
+function firstDoneAttributes(sentences) {
+  return sentences.find((sentence) => sentence.reply === "!done")?.attributes || {};
+}
+
+function addOptionalWord(words, key, value) {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+
+  words.push(`=${key}=${value}`);
+}
+
 function createLegacyLoginResponse(password, challengeHex) {
   const challenge = Buffer.from(challengeHex, "hex");
   const digest = crypto
@@ -320,6 +361,7 @@ function extractTrapMessage(sentences) {
 }
 
 module.exports = {
+  addWireGuardPeer,
   fetchWireGuardState,
   testRouterConnection
 };

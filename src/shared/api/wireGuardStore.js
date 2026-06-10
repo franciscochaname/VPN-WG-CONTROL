@@ -7,3 +7,11 @@ export async function listWireGuardTunnels(routerId) {
 
   return [];
 }
+
+export async function addWireGuardPeer(payload) {
+  if (electronApi()?.wireguard) {
+    return electronApi().wireguard.addPeer(payload);
+  }
+
+  throw new Error("La creacion de peers WireGuard solo esta disponible dentro de Electron.");
+}

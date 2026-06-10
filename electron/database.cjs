@@ -3,7 +3,7 @@ const { createHash, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
-const { fetchWireGuardState, testRouterConnection } = require("./routerosClient.cjs");
+const { addWireGuardPeer, fetchWireGuardState, testRouterConnection } = require("./routerosClient.cjs");
 const { diagnoseRouterServices } = require("./serviceDiagnostics.cjs");
 const { generateWireGuardKeyPair } = require("./wireguardKeys.cjs");
 
@@ -114,6 +114,7 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("dashboard:snapshot", () => getDashboardSnapshot());
   ipcMain.handle("security:health", () => getSecurityHealth());
   ipcMain.handle("wireguard:list-tunnels", (_event, routerId) => listWireGuardTunnels(routerId));
+  ipcMain.handle("wireguard:add-peer", (_event, payload) => createWireGuardPeer(payload));
   ipcMain.handle("wireguard-keys:list", () => listWireGuardKeys());
   ipcMain.handle("wireguard-keys:generate", (_event, payload) => createWireGuardKey(payload));
   ipcMain.handle("wireguard-keys:remove", (_event, keyId) => removeWireGuardKey(keyId));
@@ -426,6 +427,25 @@ function listWireGuardKeys() {
     .all();
 }
 
+async function createWireGuardPeer(payload = {}) {
+  assertDatabase();
+  const peer = validateWireGuardPeerPayload(payload);
+  const router = getRouterWithSecret(peer.routerId);
+
+  if (!router.monitorWireGuard) {
+    throw new Error("El monitoreo WireGuard no esta habilitado para este router.");
+  }
+
+  try {
+    await addWireGuardPeer(toConnectionConfig(router), peer);
+    insertLog(peer.routerId, "wireguard-peer", "info", `Peer agregado en ${peer.interfaceName}: ${peer.allowedAddress}.`);
+    return await syncWireGuard(peer.routerId);
+  } catch (error) {
+    markRouterOffline(peer.routerId, error.message);
+    throw error;
+  }
+}
+
 function createWireGuardKey(payload = {}) {
   assertDatabase();
   const label = cleanText(payload.label) || `Llave WireGuard ${new Date().toLocaleString("es-PE")}`;
@@ -523,6 +543,65 @@ function listWireGuardTunnels(routerId) {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt
     }));
+}
+
+function validateWireGuardPeerPayload(payload) {
+  const routerId = cleanText(payload.routerId);
+  const interfaceName = cleanText(payload.interfaceName);
+  const keyId = cleanText(payload.keyId);
+  const manualPublicKey = cleanText(payload.publicKey);
+  const allowedAddress = cleanText(payload.allowedAddress);
+  const endpointAddress = cleanText(payload.endpointAddress);
+  const endpointPort = payload.endpointPort ? Number(payload.endpointPort) : null;
+  const persistentKeepalive = cleanText(payload.persistentKeepalive);
+  const comment = cleanText(payload.comment);
+  const publicKey = keyId ? getPublicKeyFromVault(keyId) : manualPublicKey;
+
+  if (!routerId) {
+    throw new Error("Selecciona un router.");
+  }
+
+  if (!interfaceName) {
+    throw new Error("Ingresa la interfaz WireGuard del router.");
+  }
+
+  if (!isWireGuardPublicKey(publicKey)) {
+    throw new Error("La llave publica WireGuard debe tener formato base64 de 32 bytes.");
+  }
+
+  if (!allowedAddress) {
+    throw new Error("Ingresa el allowed-address del peer.");
+  }
+
+  if (endpointPort !== null && (!Number.isInteger(endpointPort) || endpointPort < 1 || endpointPort > 65535)) {
+    throw new Error("El puerto endpoint debe estar entre 1 y 65535.");
+  }
+
+  return {
+    routerId,
+    interfaceName,
+    publicKey,
+    allowedAddress,
+    endpointAddress,
+    endpointPort,
+    persistentKeepalive,
+    comment,
+    disabled: Boolean(payload.disabled)
+  };
+}
+
+function getPublicKeyFromVault(keyId) {
+  const row = db.prepare("SELECT public_key AS publicKey FROM tb_wireguard_keys WHERE id = ?").get(keyId);
+
+  if (!row) {
+    throw new Error("Llave WireGuard no encontrada.");
+  }
+
+  return row.publicKey;
+}
+
+function isWireGuardPublicKey(value) {
+  return /^[A-Za-z0-9+/]{43}=$/.test(value || "");
 }
 
 function getRouterWithSecret(routerId) {
