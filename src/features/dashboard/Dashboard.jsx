@@ -1,6 +1,7 @@
-import { Activity, BrainCircuit, Clock3, DatabaseZap, Gauge, Network, Plus, RefreshCw, Router } from "lucide-react";
-import { useState } from "react";
+import { Activity, BellRing, BrainCircuit, Clock3, DatabaseZap, Gauge, Network, Plus, RefreshCw, Router } from "lucide-react";
+import { useEffect, useState } from "react";
 import MetricCard from "../../shared/ui/MetricCard.jsx";
+import { getEventServerStatus, listEvents } from "../../shared/api/eventStore.js";
 import TopologyMap from "./TopologyMap.jsx";
 
 function buildStats(metrics) {
@@ -40,6 +41,8 @@ function Dashboard({
   const stats = buildStats(metrics);
   const [syncMessage, setSyncMessage] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [eventStatus, setEventStatus] = useState(monitoring.eventServer || {});
+  const [events, setEvents] = useState([]);
 
   async function handleSyncSelectedRouter() {
     if (!onSyncSelectedRouter) {
@@ -59,6 +62,30 @@ function Dashboard({
       setIsSyncing(false);
     }
   }
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function refreshEvents() {
+      const [status, nextEvents] = await Promise.all([
+        getEventServerStatus(),
+        listEvents(5)
+      ]);
+
+      if (isMounted) {
+        setEventStatus(status);
+        setEvents(nextEvents);
+      }
+    }
+
+    refreshEvents();
+    const intervalId = window.setInterval(refreshEvents, 8000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   return (
     <section className="space-y-5">
@@ -136,6 +163,53 @@ function Dashboard({
           </div>
         </section>
       </div>
+
+      <section className="rounded-lg border border-warm-line bg-warm-panel p-5 shadow-soft">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-warm-copper">Eventos en vivo</p>
+            <h2 className="mt-1 text-lg font-semibold">Syslog y Webhook</h2>
+            <p className="mt-1 text-sm text-warm-muted">
+              Recepcion local para alertas del router, caidas de tunel, bloqueos firewall y mensajes operativos.
+            </p>
+          </div>
+          <span className={eventStatus.httpListening || eventStatus.syslogListening ? "event-server-pill event-server-pill-on" : "event-server-pill"}>
+            <BellRing size={15} />
+            {eventStatus.httpListening || eventStatus.syslogListening ? "escuchando" : "sin escucha"}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[280px_280px_minmax(0,1fr)]">
+          <div className="monitor-strip">
+            <span>Webhook HTTP</span>
+            <strong>{eventStatus.httpListening ? `:${eventStatus.httpPort}` : "apagado"}</strong>
+          </div>
+          <div className="monitor-strip">
+            <span>Syslog UDP</span>
+            <strong>{eventStatus.syslogListening ? `:${eventStatus.syslogPort}` : "apagado"}</strong>
+          </div>
+          <div className="monitor-strip">
+            <span>Segmentos IP</span>
+            <strong>{metrics.ipSegments || 0}</strong>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2">
+          {events.length === 0 ? (
+            <p className="rounded-lg bg-[#fff9ef] px-3 py-2 text-sm font-semibold text-warm-muted">
+              Sin eventos recibidos todavia. Configura el router para enviar syslog UDP o webhook hacia esta estacion.
+            </p>
+          ) : (
+            events.map((event) => (
+              <article className={`live-event live-event-${event.level}`} key={event.id}>
+                <strong>{event.source}</strong>
+                <span>{event.message}</span>
+                <small>{formatDateTime(event.createdAt)}</small>
+              </article>
+            ))
+          )}
+        </div>
+      </section>
 
       <div className="rounded-lg border border-warm-line bg-warm-panel p-5 shadow-soft">
         <div className="mb-4 flex items-center justify-between gap-4">

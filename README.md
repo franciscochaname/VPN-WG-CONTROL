@@ -100,3 +100,9 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego refresco local periodico del dashboard cada 10 segundos sin saturar RouterOS.
 - Se mejoro Firewall con puntuacion de riesgo, resumen por cadenas, filtros visuales y recomendaciones accionables.
 - Se agregaron presets adicionales para WebFig y forward de peers, manteniendo verificacion contra reglas reales sincronizadas.
+- Se agrego receptor local de eventos HTTP Webhook y Syslog UDP para alertas vivas del router.
+- Se agrego endpoint de estado del receptor para monitoreo local durante desarrollo y ejecucion instalada.
+- Se agrego orquestador WireGuard por tipos: acceso remoto, sitio a sitio, sede con NAT y troncal.
+- La creacion guiada de VPN ahora aplica peer, firewall, rutas, NAT opcional y verificacion final por pasos.
+- Se agrego inventario IPAM con tabla `tb_ip_segments` para segmentos reales y planificados.
+- Se agrego vista Segmentos para sincronizar IPs del router, clasificar LAN/WAN/VPN/troncales y registrar redes manuales.

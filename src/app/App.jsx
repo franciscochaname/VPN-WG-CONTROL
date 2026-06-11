@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Dashboard from "../features/dashboard/Dashboard.jsx";
 import FirewallCenter from "../features/firewall/FirewallCenter.jsx";
+import IpamCenter from "../features/ipam/IpamCenter.jsx";
 import WireGuardKeys from "../features/keys/WireGuardKeys.jsx";
 import Header from "../features/layout/Header.jsx";
 import OperationsPanel from "../features/layout/OperationsPanel.jsx";
@@ -30,7 +31,8 @@ function App() {
     totalRxBytes: 0,
     totalTxBytes: 0,
     throughputBps: 0,
-    handshakeMissing: 0
+    handshakeMissing: 0,
+    ipSegments: 0
   });
   const [monitoring, setMonitoring] = useState({
     mode: "training",
@@ -41,6 +43,7 @@ function App() {
     throughputBps: 0,
     handshakeMissing: 0,
     activeTunnels: 0,
+    eventServer: {},
     findings: []
   });
   const [selectedRouterId, setSelectedRouterId] = useState(null);
@@ -70,6 +73,7 @@ function App() {
         throughputBps: 0,
         handshakeMissing: 0,
         activeTunnels: 0,
+        eventServer: {},
         findings: []
       });
       setSelectedRouterId((currentId) => {
@@ -190,6 +194,10 @@ function ContentView({
 
   if (activeView === "keys") {
     return <WireGuardKeys routers={routers} />;
+  }
+
+  if (activeView === "ipam") {
+    return <IpamCenter selectedRouter={selectedRouter} />;
   }
 
   return (

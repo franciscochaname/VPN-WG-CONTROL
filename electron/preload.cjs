@@ -18,7 +18,8 @@ contextBridge.exposeInMainWorld("vpnWgControl", {
   },
   wireguard: {
     listTunnels: (routerId) => ipcRenderer.invoke("wireguard:list-tunnels", routerId),
-    addPeer: (payload) => ipcRenderer.invoke("wireguard:add-peer", payload)
+    addPeer: (payload) => ipcRenderer.invoke("wireguard:add-peer", payload),
+    orchestrate: (payload) => ipcRenderer.invoke("wireguard:orchestrate", payload)
   },
   wireguardKeys: {
     list: () => ipcRenderer.invoke("wireguard-keys:list"),
@@ -29,5 +30,15 @@ contextBridge.exposeInMainWorld("vpnWgControl", {
     list: (routerId) => ipcRenderer.invoke("firewall:list", routerId),
     sync: (routerId) => ipcRenderer.invoke("firewall:sync", routerId),
     applyPreset: (payload) => ipcRenderer.invoke("firewall:apply-preset", payload)
+  },
+  events: {
+    status: () => ipcRenderer.invoke("events:status"),
+    list: (limit) => ipcRenderer.invoke("events:list", limit)
+  },
+  ipam: {
+    list: (routerId) => ipcRenderer.invoke("ipam:list", routerId),
+    sync: (routerId) => ipcRenderer.invoke("ipam:sync", routerId),
+    create: (payload) => ipcRenderer.invoke("ipam:create", payload),
+    remove: (segmentId) => ipcRenderer.invoke("ipam:remove", segmentId)
   }
 });

@@ -4,12 +4,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const {
+  addFirewallNatRule,
   addFirewallFilterRule,
+  addIpRoute,
   addWireGuardPeer,
   fetchFirewallState,
+  fetchIpInventory,
   fetchWireGuardState,
   testRouterConnection
 } = require("./routerosClient.cjs");
+const { getEventServerStatus } = require("./eventServer.cjs");
 const { diagnoseRouterServices } = require("./serviceDiagnostics.cjs");
 const { generateWireGuardKeyPair } = require("./wireguardKeys.cjs");
 
@@ -138,6 +142,35 @@ function initializeDatabase(userDataPath) {
       FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS tb_ip_segments (
+      id TEXT PRIMARY KEY,
+      router_id TEXT,
+      label TEXT NOT NULL,
+      cidr TEXT NOT NULL,
+      gateway TEXT,
+      interface_name TEXT,
+      purpose TEXT NOT NULL DEFAULT 'unknown',
+      vlan_id TEXT,
+      trunk_name TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      raw_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS tb_orchestration_runs (
+      id TEXT PRIMARY KEY,
+      router_id TEXT NOT NULL,
+      vpn_type TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL,
+      steps_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tuneles_router_id ON tb_tuneles(router_id);
     CREATE INDEX IF NOT EXISTS idx_logs_router_id ON tb_logs_eventos(router_id);
     CREATE INDEX IF NOT EXISTS idx_diagnosticos_router_id ON tb_diagnosticos(router_id);
@@ -145,6 +178,8 @@ function initializeDatabase(userDataPath) {
     CREATE INDEX IF NOT EXISTS idx_firewall_rules_router_id ON tb_firewall_rules(router_id);
     CREATE INDEX IF NOT EXISTS idx_telemetry_samples_router_id ON tb_telemetry_samples(router_id);
     CREATE INDEX IF NOT EXISTS idx_telemetry_samples_tunnel_id ON tb_telemetry_samples(tunnel_id);
+    CREATE INDEX IF NOT EXISTS idx_ip_segments_router_id ON tb_ip_segments(router_id);
+    CREATE INDEX IF NOT EXISTS idx_orchestration_runs_router_id ON tb_orchestration_runs(router_id);
   `);
   runMigrations();
 }
@@ -160,12 +195,19 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("security:health", () => getSecurityHealth());
   ipcMain.handle("wireguard:list-tunnels", (_event, routerId) => listWireGuardTunnels(routerId));
   ipcMain.handle("wireguard:add-peer", (_event, payload) => createWireGuardPeer(payload));
+  ipcMain.handle("wireguard:orchestrate", (_event, payload) => orchestrateWireGuardVpn(payload));
   ipcMain.handle("wireguard-keys:list", () => listWireGuardKeys());
   ipcMain.handle("wireguard-keys:generate", (_event, payload) => createWireGuardKey(payload));
   ipcMain.handle("wireguard-keys:remove", (_event, keyId) => removeWireGuardKey(keyId));
   ipcMain.handle("firewall:list", (_event, routerId) => listFirewall(routerId));
   ipcMain.handle("firewall:sync", (_event, routerId) => syncFirewall(routerId));
   ipcMain.handle("firewall:apply-preset", (_event, payload) => applyFirewallPreset(payload));
+  ipcMain.handle("events:status", () => getLiveEventStatus());
+  ipcMain.handle("events:list", (_event, limit) => listLiveEvents(limit));
+  ipcMain.handle("ipam:list", (_event, routerId) => listIpSegments(routerId));
+  ipcMain.handle("ipam:sync", (_event, routerId) => syncIpInventory(routerId));
+  ipcMain.handle("ipam:create", (_event, payload) => createIpSegment(payload));
+  ipcMain.handle("ipam:remove", (_event, segmentId) => removeIpSegment(segmentId));
 }
 
 function listRouters() {
@@ -396,6 +438,7 @@ function getDashboardSnapshot() {
   const tunnels = listWireGuardTunnels();
   const tunnelCount = db.prepare("SELECT COUNT(*) AS total FROM tb_tuneles").get().total;
   const eventCount = db.prepare("SELECT COUNT(*) AS total FROM tb_logs_eventos").get().total;
+  const segmentCount = db.prepare("SELECT COUNT(*) AS total FROM tb_ip_segments").get().total;
   const monitoring = buildMonitoringSnapshot(routers, tunnels);
 
   return {
@@ -412,7 +455,8 @@ function getDashboardSnapshot() {
       totalRxBytes: monitoring.totalRxBytes,
       totalTxBytes: monitoring.totalTxBytes,
       throughputBps: monitoring.throughputBps,
-      handshakeMissing: monitoring.handshakeMissing
+      handshakeMissing: monitoring.handshakeMissing,
+      ipSegments: Number(segmentCount || 0)
     }
   };
 }
@@ -511,6 +555,7 @@ function buildMonitoringSnapshot(routers, tunnels) {
 
   return {
     updatedAt: new Date().toISOString(),
+    eventServer: getEventServerStatus(),
     latestSampleAt: sampleStats.latestSampleAt || null,
     sampleCount: Number(sampleStats.total || 0),
     confidence: calculateMonitoringConfidence(Number(sampleStats.total || 0), tunnels.length),
@@ -731,6 +776,117 @@ async function createWireGuardPeer(payload = {}) {
     return await syncWireGuard(peer.routerId);
   } catch (error) {
     markRouterOffline(peer.routerId, error.message);
+    throw error;
+  }
+}
+
+async function orchestrateWireGuardVpn(payload = {}) {
+  assertDatabase();
+  const plan = validateVpnOrchestrationPayload(payload);
+  const router = getRouterWithSecret(plan.routerId);
+  const steps = [];
+  const runId = randomUUID();
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO tb_orchestration_runs (id, router_id, vpn_type, label, status, steps_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(runId, plan.routerId, plan.vpnType, plan.label, "running", JSON.stringify(steps), now);
+
+  try {
+    await runOrchestrationStep(steps, "peer", "Crear peer WireGuard", () =>
+      addWireGuardPeer(toConnectionConfig(router), plan.peer)
+    );
+
+    for (const rule of buildOrchestrationFilterRules(router, plan)) {
+      await runOrchestrationStep(steps, "firewall-filter", rule.comment, () =>
+        addFirewallFilterRule(toConnectionConfig(router), rule)
+      );
+    }
+
+    for (const route of buildOrchestrationRoutes(plan)) {
+      await runOrchestrationStep(steps, "route", route.comment, () =>
+        addIpRoute(toConnectionConfig(router), route)
+      );
+    }
+
+    for (const rule of buildOrchestrationNatRules(plan)) {
+      await runOrchestrationStep(steps, "firewall-nat", rule.comment, () =>
+        addFirewallNatRule(toConnectionConfig(router), rule)
+      );
+    }
+
+    await runOrchestrationStep(steps, "verify-wireguard", "Verificar peer en lectura WireGuard", async () => {
+      const state = await fetchWireGuardState(toConnectionConfig(router));
+      replaceWireGuardTunnels(plan.routerId, state, new Date().toISOString());
+      return { peers: state.peers.length };
+    });
+
+    await runOrchestrationStep(steps, "verify-firewall", "Verificar reglas firewall", async () => {
+      const state = await fetchFirewallState(toConnectionConfig(router));
+      replaceFirewallRules(plan.routerId, "filter", state.filter, new Date().toISOString());
+      replaceFirewallRules(plan.routerId, "nat", state.nat, new Date().toISOString());
+      return { filter: state.filter.length, nat: state.nat.length };
+    });
+
+    const completedAt = new Date().toISOString();
+    db.prepare(`
+      UPDATE tb_orchestration_runs
+      SET status = 'completed', steps_json = ?, completed_at = ?
+      WHERE id = ?
+    `).run(JSON.stringify(steps), completedAt, runId);
+
+    insertLog(plan.routerId, "vpn-orchestrator", "info", `VPN ${plan.label} creada como ${plan.vpnType}.`);
+
+    return {
+      runId,
+      status: "completed",
+      steps,
+      snapshot: getDashboardSnapshot(),
+      firewall: listFirewall(plan.routerId)
+    };
+  } catch (error) {
+    steps.push({
+      key: "failed",
+      label: "Orquestacion detenida",
+      status: "error",
+      detail: error.message
+    });
+
+    db.prepare(`
+      UPDATE tb_orchestration_runs
+      SET status = 'failed', steps_json = ?, completed_at = ?
+      WHERE id = ?
+    `).run(JSON.stringify(steps), new Date().toISOString(), runId);
+
+    insertLog(plan.routerId, "vpn-orchestrator", "error", error.message);
+    throw error;
+  }
+}
+
+async function runOrchestrationStep(steps, key, label, action) {
+  const startedAt = new Date().toISOString();
+
+  try {
+    const result = await action();
+    steps.push({
+      key,
+      label,
+      status: "ok",
+      startedAt,
+      completedAt: new Date().toISOString(),
+      result
+    });
+    return result;
+  } catch (error) {
+    steps.push({
+      key,
+      label,
+      status: "error",
+      startedAt,
+      completedAt: new Date().toISOString(),
+      detail: error.message
+    });
     throw error;
   }
 }
@@ -1201,6 +1357,158 @@ function validateWireGuardPeerPayload(payload) {
   };
 }
 
+function validateVpnOrchestrationPayload(payload = {}) {
+  const vpnType = ["remote-access", "site-to-site", "branch-nat", "trunk"].includes(payload.vpnType)
+    ? payload.vpnType
+    : "remote-access";
+  const label = cleanText(payload.label) || `VPN ${new Date().toLocaleString("es-PE")}`;
+  const peer = validateWireGuardPeerPayload({
+    routerId: payload.routerId,
+    interfaceName: payload.interfaceName,
+    keyId: payload.keyId,
+    publicKey: payload.publicKey,
+    allowedAddress: payload.allowedAddress,
+    endpointAddress: payload.endpointAddress,
+    endpointPort: payload.endpointPort,
+    persistentKeepalive: payload.persistentKeepalive,
+    comment: cleanText(payload.comment) || `VPN WG CONTROL ${label}`,
+    disabled: payload.disabled
+  });
+  const localSubnet = cleanText(payload.localSubnet);
+  const remoteSubnet = cleanText(payload.remoteSubnet);
+  const listenPort = payload.listenPort ? Number(payload.listenPort) : null;
+  const routeDistance = payload.routeDistance ? Number(payload.routeDistance) : 1;
+  const enableFirewall = payload.enableFirewall !== false;
+  const enableNat = Boolean(payload.enableNat);
+
+  if (listenPort !== null && (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535)) {
+    throw new Error("El puerto publico WireGuard debe estar entre 1 y 65535.");
+  }
+
+  if (!Number.isInteger(routeDistance) || routeDistance < 1 || routeDistance > 255) {
+    throw new Error("La distancia de ruta debe estar entre 1 y 255.");
+  }
+
+  if (["site-to-site", "branch-nat", "trunk"].includes(vpnType) && !remoteSubnet) {
+    throw new Error("Ingresa la red remota para este tipo de VPN.");
+  }
+
+  return {
+    routerId: peer.routerId,
+    vpnType,
+    label,
+    peer,
+    localSubnet,
+    remoteSubnet,
+    listenPort,
+    routeDistance,
+    enableFirewall,
+    enableNat
+  };
+}
+
+function buildOrchestrationFilterRules(router, plan) {
+  if (!plan.enableFirewall) {
+    return [];
+  }
+
+  const rules = [];
+  const suffix = `VPN WG CONTROL ${plan.label}`;
+
+  if (plan.listenPort) {
+    rules.push({
+      chain: "input",
+      action: "accept",
+      protocol: "udp",
+      dstPort: String(plan.listenPort),
+      comment: `Allow WireGuard UDP ${suffix}`
+    });
+  }
+
+  rules.push({
+    chain: "forward",
+    action: "accept",
+    connectionState: "established,related",
+    comment: `Allow established forward ${suffix}`
+  });
+
+  if (plan.peer.allowedAddress) {
+    rules.push({
+      chain: "forward",
+      action: "accept",
+      srcAddress: plan.peer.allowedAddress,
+      comment: `Allow peer source ${suffix}`
+    });
+    rules.push({
+      chain: "forward",
+      action: "accept",
+      dstAddress: plan.peer.allowedAddress,
+      comment: `Allow peer destination ${suffix}`
+    });
+  }
+
+  if (plan.localSubnet && plan.remoteSubnet) {
+    rules.push({
+      chain: "forward",
+      action: "accept",
+      srcAddress: plan.localSubnet,
+      dstAddress: plan.remoteSubnet,
+      comment: `Allow local to remote ${suffix}`
+    });
+    rules.push({
+      chain: "forward",
+      action: "accept",
+      srcAddress: plan.remoteSubnet,
+      dstAddress: plan.localSubnet,
+      comment: `Allow remote to local ${suffix}`
+    });
+  }
+
+  if (router.apiPort) {
+    rules.push({
+      chain: "input",
+      action: "accept",
+      protocol: "tcp",
+      dstPort: String(router.apiPort),
+      comment: `Keep management API ${suffix}`
+    });
+  }
+
+  return rules;
+}
+
+function buildOrchestrationRoutes(plan) {
+  if (!["site-to-site", "branch-nat", "trunk"].includes(plan.vpnType) || !plan.remoteSubnet) {
+    return [];
+  }
+
+  return [
+    {
+      dstAddress: plan.remoteSubnet,
+      gateway: plan.peer.interfaceName,
+      distance: String(plan.routeDistance),
+      comment: `Route ${plan.remoteSubnet} VPN WG CONTROL ${plan.label}`
+    }
+  ];
+}
+
+function buildOrchestrationNatRules(plan) {
+  if (!plan.enableNat && plan.vpnType !== "branch-nat") {
+    return [];
+  }
+
+  return [
+    {
+      chain: "srcnat",
+      action: "masquerade",
+      srcAddress: plan.localSubnet || null,
+      dstAddress: plan.remoteSubnet || plan.peer.allowedAddress || null,
+      outInterface: plan.peer.interfaceName,
+      comment: `Masquerade VPN WG CONTROL ${plan.label}`
+    }
+  ];
+}
+
 function getPublicKeyFromVault(keyId) {
   const row = db.prepare("SELECT public_key AS publicKey FROM tb_wireguard_keys WHERE id = ?").get(keyId);
 
@@ -1526,6 +1834,252 @@ function normalizeRouterRow(row) {
   };
 }
 
+function ingestLiveEvent(event = {}) {
+  assertDatabase();
+  const router = findRouterByRemoteAddress(event.remoteAddress);
+  const level = ["info", "warning", "error"].includes(event.level) ? event.level : "info";
+  const source = cleanText(event.source) || "live-event";
+  const message = cleanText(event.message) || "Evento recibido.";
+
+  insertLog(router?.id || null, source, level, message);
+}
+
+function getLiveEventStatus() {
+  assertDatabase();
+  const latest = db
+    .prepare(`
+      SELECT created_at AS createdAt
+      FROM tb_logs_eventos
+      WHERE source IN ('syslog', 'webhook', 'live-event')
+      ORDER BY created_at DESC
+      LIMIT 1
+    `)
+    .get();
+
+  return {
+    ...getEventServerStatus(),
+    latestStoredEventAt: latest?.createdAt || null
+  };
+}
+
+function listLiveEvents(limit = 30) {
+  assertDatabase();
+  const cleanLimit = Math.max(1, Math.min(100, Number(limit || 30)));
+
+  return db
+    .prepare(`
+      SELECT
+        l.id,
+        l.router_id AS routerId,
+        r.alias AS routerAlias,
+        l.source,
+        l.level,
+        l.message,
+        l.created_at AS createdAt
+      FROM tb_logs_eventos l
+      LEFT JOIN tb_config_router r ON r.id = l.router_id
+      ORDER BY l.created_at DESC
+      LIMIT ?
+    `)
+    .all(cleanLimit);
+}
+
+function listIpSegments(routerId) {
+  assertDatabase();
+  const params = [];
+  let where = "";
+
+  if (routerId) {
+    where = "WHERE s.router_id = ?";
+    params.push(routerId);
+  }
+
+  return db
+    .prepare(`
+      SELECT
+        s.id,
+        s.router_id AS routerId,
+        r.alias AS routerAlias,
+        s.label,
+        s.cidr,
+        s.gateway,
+        s.interface_name AS interfaceName,
+        s.purpose,
+        s.vlan_id AS vlanId,
+        s.trunk_name AS trunkName,
+        s.source,
+        s.created_at AS createdAt,
+        s.updated_at AS updatedAt
+      FROM tb_ip_segments s
+      LEFT JOIN tb_config_router r ON r.id = s.router_id
+      ${where}
+      ORDER BY s.purpose, s.cidr
+    `)
+    .all(...params);
+}
+
+async function syncIpInventory(routerId) {
+  assertDatabase();
+  const router = getRouterWithSecret(routerId);
+  const state = await fetchIpInventory(toConnectionConfig(router));
+  const now = new Date().toISOString();
+  const deleteStatement = db.prepare("DELETE FROM tb_ip_segments WHERE router_id = ? AND source = 'routeros'");
+  const insertStatement = db.prepare(`
+    INSERT INTO tb_ip_segments (
+      id,
+      router_id,
+      label,
+      cidr,
+      gateway,
+      interface_name,
+      purpose,
+      vlan_id,
+      trunk_name,
+      source,
+      raw_json,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  db.exec("BEGIN");
+  try {
+    deleteStatement.run(routerId);
+    for (const address of state.addresses) {
+      const interfaceName = address.interface || "sin-interfaz";
+      const vlan = state.vlans.find((item) => item.name === interfaceName);
+      insertStatement.run(
+        randomUUID(),
+        routerId,
+        address.comment || interfaceName,
+        address.address || address.network || "0.0.0.0/32",
+        extractGateway(address.address),
+        interfaceName,
+        classifySegment(interfaceName, address.comment),
+        vlan?.["vlan-id"] || null,
+        vlan?.interface || null,
+        "routeros",
+        JSON.stringify(address),
+        now,
+        now
+      );
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  insertLog(routerId, "ipam-sync", "info", `Segmentacion IP sincronizada: ${state.addresses.length} direcciones.`);
+
+  return {
+    segments: listIpSegments(routerId),
+    routes: state.routes.length,
+    interfaces: state.interfaces.length,
+    vlans: state.vlans.length
+  };
+}
+
+function createIpSegment(payload = {}) {
+  assertDatabase();
+  const routerId = cleanText(payload.routerId) || null;
+  const cidr = cleanText(payload.cidr);
+  const label = cleanText(payload.label) || cidr;
+  const now = new Date().toISOString();
+
+  if (routerId) {
+    assertRouterExists(routerId);
+  }
+
+  if (!cidr || !cidr.includes("/")) {
+    throw new Error("Ingresa un segmento CIDR valido.");
+  }
+
+  const id = randomUUID();
+  db.prepare(`
+    INSERT INTO tb_ip_segments (
+      id,
+      router_id,
+      label,
+      cidr,
+      gateway,
+      interface_name,
+      purpose,
+      vlan_id,
+      trunk_name,
+      source,
+      raw_json,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    routerId,
+    label,
+    cidr,
+    cleanText(payload.gateway) || null,
+    cleanText(payload.interfaceName) || null,
+    cleanText(payload.purpose) || "unknown",
+    cleanText(payload.vlanId) || null,
+    cleanText(payload.trunkName) || null,
+    "manual",
+    JSON.stringify(payload),
+    now,
+    now
+  );
+
+  return listIpSegments(routerId).find((segment) => segment.id === id);
+}
+
+function removeIpSegment(segmentId) {
+  assertDatabase();
+
+  if (!segmentId || typeof segmentId !== "string") {
+    throw new Error("Segmento invalido.");
+  }
+
+  db.prepare("DELETE FROM tb_ip_segments WHERE id = ?").run(segmentId);
+  return { ok: true };
+}
+
+function findRouterByRemoteAddress(remoteAddress) {
+  if (!remoteAddress) {
+    return null;
+  }
+
+  const normalized = String(remoteAddress).replace(/^::ffff:/, "");
+  return listRouters().find((router) => router.host === normalized) || null;
+}
+
+function extractGateway(cidr) {
+  const [address] = String(cidr || "").split("/");
+  return address || null;
+}
+
+function classifySegment(interfaceName = "", comment = "") {
+  const text = `${interfaceName} ${comment}`.toLowerCase();
+
+  if (/wireguard|wg|vpn/.test(text)) {
+    return "vpn";
+  }
+
+  if (/vlan|trunk|sfp|bond|bridge/.test(text)) {
+    return "trunk";
+  }
+
+  if (/wan|internet|pppoe/.test(text)) {
+    return "wan";
+  }
+
+  if (/lan|local|clientes|users/.test(text)) {
+    return "lan";
+  }
+
+  return "unknown";
+}
+
 function runMigrations() {
   ensureColumn("tb_config_router", "webfig_port", "INTEGER NOT NULL DEFAULT 8443");
   ensureColumn("tb_config_router", "webfig_tls", "INTEGER NOT NULL DEFAULT 1");
@@ -1571,6 +2125,7 @@ function assertDatabase() {
 }
 
 module.exports = {
+  ingestLiveEvent,
   initializeDatabase,
   registerRouterHandlers
 };

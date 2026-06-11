@@ -324,6 +324,74 @@ async function addFirewallFilterRule(config, rule) {
   });
 }
 
+async function addFirewallNatRule(config, rule) {
+  return withRouterOsSession(config, async (client) => {
+    const words = [
+      "/ip/firewall/nat/add",
+      `=chain=${rule.chain}`,
+      `=action=${rule.action}`
+    ];
+
+    addOptionalWord(words, "protocol", rule.protocol);
+    addOptionalWord(words, "src-address", rule.srcAddress);
+    addOptionalWord(words, "dst-address", rule.dstAddress);
+    addOptionalWord(words, "dst-port", rule.dstPort);
+    addOptionalWord(words, "in-interface", rule.inInterface);
+    addOptionalWord(words, "out-interface", rule.outInterface);
+    addOptionalWord(words, "to-addresses", rule.toAddresses);
+    addOptionalWord(words, "comment", rule.comment);
+    addOptionalWord(words, "place-before", rule.placeBefore);
+
+    if (rule.disabled) {
+      words.push("=disabled=yes");
+    }
+
+    const response = await client.command(words);
+    return {
+      response: firstDoneAttributes(response)
+    };
+  });
+}
+
+async function addIpRoute(config, route) {
+  return withRouterOsSession(config, async (client) => {
+    const words = [
+      "/ip/route/add",
+      `=dst-address=${route.dstAddress}`,
+      `=gateway=${route.gateway}`
+    ];
+
+    addOptionalWord(words, "distance", route.distance);
+    addOptionalWord(words, "routing-table", route.routingTable);
+    addOptionalWord(words, "comment", route.comment);
+
+    if (route.disabled) {
+      words.push("=disabled=yes");
+    }
+
+    const response = await client.command(words);
+    return {
+      response: firstDoneAttributes(response)
+    };
+  });
+}
+
+async function fetchIpInventory(config) {
+  return withRouterOsSession(config, async (client) => {
+    const addresses = await client.command(["/ip/address/print"]);
+    const routes = await client.command(["/ip/route/print"]);
+    const interfaces = await client.command(["/interface/print"]);
+    const vlans = await client.command(["/interface/vlan/print"]);
+
+    return {
+      addresses: dataAttributes(addresses),
+      routes: dataAttributes(routes),
+      interfaces: dataAttributes(interfaces),
+      vlans: dataAttributes(vlans)
+    };
+  });
+}
+
 function encodeLength(length) {
   if (length < 0x80) {
     return Buffer.from([length]);
@@ -402,9 +470,12 @@ function extractTrapMessage(sentences) {
 }
 
 module.exports = {
+  addIpRoute,
   addWireGuardPeer,
   addFirewallFilterRule,
+  addFirewallNatRule,
   fetchFirewallState,
+  fetchIpInventory,
   fetchWireGuardState,
   testRouterConnection
 };

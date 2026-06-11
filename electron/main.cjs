@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
-const { initializeDatabase, registerRouterHandlers } = require("./database.cjs");
+const { initializeDatabase, ingestLiveEvent, registerRouterHandlers } = require("./database.cjs");
+const { startEventServer, stopEventServer } = require("./eventServer.cjs");
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -28,6 +29,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   initializeDatabase(app.getPath("userData"));
+  startEventServer({ onEvent: ingestLiveEvent });
   registerRouterHandlers(ipcMain);
   ipcMain.handle("app:get-version", () => app.getVersion());
   createWindow();
@@ -41,6 +43,7 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
+    stopEventServer();
     app.quit();
   }
 });

@@ -1,9 +1,10 @@
-import { Flame, KeyRound, LayoutDashboard, Network, Router, ShieldCheck } from "lucide-react";
+import { Flame, GitBranch, KeyRound, LayoutDashboard, Network, Router, ShieldCheck } from "lucide-react";
 
 const navigationItems = [
   { id: "dashboard", label: "Panel", icon: LayoutDashboard },
   { id: "routers", label: "Routers", icon: Router },
   { id: "wireguard", label: "WireGuard", icon: Network },
+  { id: "ipam", label: "Segmentos", icon: GitBranch },
   { id: "firewall", label: "Firewall", icon: Flame },
   { id: "security", label: "Seguridad", icon: ShieldCheck },
   { id: "keys", label: "Llaves WG", icon: KeyRound }
