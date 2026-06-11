@@ -106,3 +106,4 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - La creacion guiada de VPN ahora aplica peer, firewall, rutas, NAT opcional y verificacion final por pasos.
 - Se agrego inventario IPAM con tabla `tb_ip_segments` para segmentos reales y planificados.
 - Se agrego vista Segmentos para sincronizar IPs del router, clasificar LAN/WAN/VPN/troncales y registrar redes manuales.
+- Se rediseño la creacion WireGuard como asistente interactivo por tipo de conexion, con campos progresivos y opciones avanzadas plegadas.

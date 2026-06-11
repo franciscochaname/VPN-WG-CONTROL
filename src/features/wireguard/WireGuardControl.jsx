@@ -1,4 +1,15 @@
-import { GitBranch, Network, Plus, RefreshCw, Route, ShieldCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  GitBranch,
+  KeyRound,
+  Network,
+  Plus,
+  RefreshCw,
+  Route,
+  ShieldCheck,
+  SlidersHorizontal,
+  Wand2
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { listWireGuardKeys } from "../../shared/api/wireGuardKeyStore.js";
 import { listWireGuardTunnels, orchestrateWireGuardVpn } from "../../shared/api/wireGuardStore.js";
@@ -27,22 +38,34 @@ const vpnTypes = [
   {
     id: "remote-access",
     label: "Acceso remoto",
-    detail: "Un peer individual para soporte, usuario o equipo final."
+    shortLabel: "Usuario o equipo",
+    detail: "Peer individual para soporte, usuario, notebook o equipo final.",
+    fields: ["Nombre", "Interfaz", "Llave", "IP del peer"],
+    automation: ["Peer", "Puerto UDP", "Forward seguro", "Verificacion"]
   },
   {
     id: "site-to-site",
     label: "Sitio a sitio",
-    detail: "Une dos redes con ruta hacia el segmento remoto."
+    shortLabel: "Red contra red",
+    detail: "Une dos redes con ruta hacia el segmento remoto.",
+    fields: ["Nombre", "Interfaz", "Llave", "Red local", "Red remota"],
+    automation: ["Peer", "Firewall", "Ruta remota", "Verificacion"]
   },
   {
     id: "branch-nat",
     label: "Sede con NAT",
-    detail: "Sede remota con salida traducida por el tunel."
+    shortLabel: "Sucursal simple",
+    detail: "Conecta una sede remota usando masquerade por el tunel.",
+    fields: ["Nombre", "Interfaz", "Llave", "Red local", "Red remota"],
+    automation: ["Peer", "Firewall", "Ruta", "NAT", "Verificacion"]
   },
   {
     id: "trunk",
     label: "Troncal",
-    detail: "Enlace de transporte para segmentos o VLANs entre sedes."
+    shortLabel: "Transporte",
+    detail: "Enlace de transporte para segmentos o VLANs entre sedes.",
+    fields: ["Nombre", "Interfaz", "Llave", "Segmento remoto"],
+    automation: ["Peer", "Firewall", "Ruta troncal", "Verificacion"]
   }
 ];
 
@@ -52,14 +75,20 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
   const [peerForm, setPeerForm] = useState(initialPeerForm);
   const [isLoading, setIsLoading] = useState(true);
   const [isPeerSaving, setIsPeerSaving] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [actionState, setActionState] = useState({ type: "idle", message: "" });
   const [lastRunSteps, setLastRunSteps] = useState([]);
 
   const selectedRouterId = selectedRouter?.id || null;
+  const selectedType = useMemo(
+    () => vpnTypes.find((type) => type.id === peerForm.vpnType) || vpnTypes[0],
+    [peerForm.vpnType]
+  );
   const totalTraffic = useMemo(
     () => tunnels.reduce((sum, tunnel) => sum + tunnel.rxBytes + tunnel.txBytes, 0),
     [tunnels]
   );
+  const readiness = useMemo(() => buildReadiness(peerForm), [peerForm]);
 
   async function refreshTunnels() {
     setIsLoading(true);
@@ -95,7 +124,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
     event.preventDefault();
 
     if (!selectedRouter) {
-      setActionState({ type: "error", message: "Selecciona un router antes de crear el peer." });
+      setActionState({ type: "error", message: "Selecciona un router antes de crear la VPN." });
       return;
     }
 
@@ -108,6 +137,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
         ...peerForm
       });
       setPeerForm(initialPeerForm);
+      setShowAdvanced(false);
       setLastRunSteps(result.steps || []);
       await refreshTunnels();
       setActionState({ type: "success", message: "VPN orquestada y verificada con lectura actualizada." });
@@ -122,6 +152,14 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
     setPeerForm((current) => ({ ...current, [field]: value }));
   }
 
+  function selectVpnType(vpnType) {
+    setPeerForm((current) => ({
+      ...current,
+      vpnType,
+      enableNat: vpnType === "branch-nat" ? true : current.enableNat
+    }));
+  }
+
   useEffect(() => {
     refreshTunnels();
   }, [selectedRouterId]);
@@ -133,7 +171,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-warm-copper">WireGuard</p>
           <h2 className="mt-1 text-xl font-semibold">Tuneles y peers</h2>
           <p className="mt-1 text-sm text-warm-muted">
-            Solo se muestran interfaces y peers sincronizados desde RouterOS.
+            Creacion guiada por tipo de conexion, con automatizacion de peer, reglas, rutas y verificacion.
           </p>
         </div>
         <button className="action-button" onClick={handleSync} type="button">
@@ -151,202 +189,277 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
       <form className="mb-5 rounded-lg border border-warm-line bg-[#fff9ef] p-4" onSubmit={handleCreatePeer}>
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h3 className="font-semibold">Crear VPN guiada</h3>
+            <h3 className="font-semibold">Asistente de nueva VPN</h3>
             <p className="mt-1 text-sm text-warm-muted">
-              Crea peer, reglas, rutas, NAT y verificacion final segun el tipo de despliegue.
+              Elige el tipo y completa solo los datos necesarios para ese escenario.
             </p>
           </div>
           <span className="rounded-full bg-[#f4ead9] px-3 py-1 text-xs font-bold text-warm-muted">
             {selectedRouter ? selectedRouter.alias : "Sin router"}
           </span>
         </div>
-        <div className="mb-4 grid grid-cols-1 gap-3 xl:grid-cols-4">
-          {vpnTypes.map((type) => (
-            <button
-              className={peerForm.vpnType === type.id ? "vpn-type-card vpn-type-card-active" : "vpn-type-card"}
-              key={type.id}
-              onClick={() => updatePeerField("vpnType", type.id)}
-              type="button"
-            >
-              <GitBranch size={17} />
-              <strong>{type.label}</strong>
-              <span>{type.detail}</span>
-            </button>
-          ))}
-        </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <label className="field-label">
-            Nombre del despliegue
-            <input
-              className="field-input"
-              onChange={(event) => updatePeerField("label", event.target.value)}
-              placeholder="Ej. sede-lima, soporte-remoto"
-              value={peerForm.label}
-            />
-          </label>
-          <label className="field-label">
-            Interfaz WireGuard
-            <input
-              className="field-input"
-              onChange={(event) => updatePeerField("interfaceName", event.target.value)}
-              placeholder="Ej. wireguard1"
-              required
-              value={peerForm.interfaceName}
-            />
-          </label>
-          <label className="field-label">
-            Llave de la boveda
-            <select
-              className="field-input"
-              onChange={(event) => updatePeerField("keyId", event.target.value)}
-              value={peerForm.keyId}
-            >
-              <option value="">Usar llave publica manual</option>
-              {keys.map((key) => (
-                <option key={key.id} value={key.id}>
-                  {key.label}
-                </option>
+        <div className="wizard-layout">
+          <section className="wizard-main">
+            <div className="wizard-step">
+              <div className="wizard-step-head">
+                <span>1</span>
+                <div>
+                  <h4>Tipo de conexion</h4>
+                  <p>La pantalla cambia segun el escenario elegido.</p>
+                </div>
+              </div>
+              <div className="vpn-type-grid">
+                {vpnTypes.map((type) => (
+                  <button
+                    className={peerForm.vpnType === type.id ? "vpn-type-card vpn-type-card-active" : "vpn-type-card"}
+                    key={type.id}
+                    onClick={() => selectVpnType(type.id)}
+                    type="button"
+                  >
+                    <GitBranch size={17} />
+                    <strong>{type.label}</strong>
+                    <small>{type.shortLabel}</small>
+                    <span>{type.detail}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="wizard-step">
+              <div className="wizard-step-head">
+                <span>2</span>
+                <div>
+                  <h4>Datos principales</h4>
+                  <p>{selectedType.fields.join(" · ")}</p>
+                </div>
+              </div>
+
+              <div className="smart-field-grid">
+                <label className="field-label">
+                  Nombre
+                  <input
+                    className="field-input"
+                    onChange={(event) => updatePeerField("label", event.target.value)}
+                    placeholder="Ej. soporte-remoto"
+                    value={peerForm.label}
+                  />
+                </label>
+                <label className="field-label">
+                  Interfaz
+                  <input
+                    className="field-input"
+                    onChange={(event) => updatePeerField("interfaceName", event.target.value)}
+                    placeholder="Ej. wireguard1"
+                    required
+                    value={peerForm.interfaceName}
+                  />
+                </label>
+                <label className="field-label">
+                  IP del peer
+                  <input
+                    className="field-input"
+                    onChange={(event) => updatePeerField("allowedAddress", event.target.value)}
+                    placeholder="Ej. 10.70.8.10/32"
+                    required
+                    value={peerForm.allowedAddress}
+                  />
+                </label>
+                {peerForm.vpnType !== "remote-access" && (
+                  <label className="field-label">
+                    Red remota
+                    <input
+                      className="field-input"
+                      onChange={(event) => updatePeerField("remoteSubnet", event.target.value)}
+                      placeholder="Ej. 10.80.0.0/24"
+                      required
+                      value={peerForm.remoteSubnet}
+                    />
+                  </label>
+                )}
+                {peerForm.vpnType !== "remote-access" && (
+                  <label className="field-label">
+                    Red local
+                    <input
+                      className="field-input"
+                      onChange={(event) => updatePeerField("localSubnet", event.target.value)}
+                      placeholder="Ej. 192.168.20.0/24"
+                      value={peerForm.localSubnet}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <div className="wizard-step">
+              <div className="wizard-step-head">
+                <span>3</span>
+                <div>
+                  <h4>Llave publica</h4>
+                  <p>Usa una llave guardada o pega la publica del cliente.</p>
+                </div>
+              </div>
+
+              <div className="key-choice">
+                <label className="field-label">
+                  Boveda de llaves
+                  <select
+                    className="field-input"
+                    onChange={(event) => updatePeerField("keyId", event.target.value)}
+                    value={peerForm.keyId}
+                  >
+                    <option value="">Usar llave publica manual</option>
+                    {keys.map((key) => (
+                      <option key={key.id} value={key.id}>
+                        {key.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {!peerForm.keyId && (
+                  <label className="field-label">
+                    Llave publica manual
+                    <input
+                      className="field-input"
+                      onChange={(event) => updatePeerField("publicKey", event.target.value)}
+                      placeholder="Base64 de 32 bytes"
+                      required
+                      value={peerForm.publicKey}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <button className="advanced-toggle" onClick={() => setShowAdvanced((current) => !current)} type="button">
+              <SlidersHorizontal size={16} />
+              <span>{showAdvanced ? "Ocultar opciones avanzadas" : "Opciones avanzadas"}</span>
+            </button>
+
+            {showAdvanced && (
+              <div className="advanced-panel">
+                <label className="field-label">
+                  Puerto publico WireGuard
+                  <input
+                    className="field-input"
+                    max="65535"
+                    min="1"
+                    onChange={(event) => updatePeerField("listenPort", event.target.value)}
+                    type="number"
+                    value={peerForm.listenPort}
+                  />
+                </label>
+                <label className="field-label">
+                  Endpoint address
+                  <input
+                    className="field-input"
+                    onChange={(event) => updatePeerField("endpointAddress", event.target.value)}
+                    placeholder="Opcional"
+                    value={peerForm.endpointAddress}
+                  />
+                </label>
+                <label className="field-label">
+                  Endpoint port
+                  <input
+                    className="field-input"
+                    max="65535"
+                    min="1"
+                    onChange={(event) => updatePeerField("endpointPort", event.target.value)}
+                    placeholder="Opcional"
+                    type="number"
+                    value={peerForm.endpointPort}
+                  />
+                </label>
+                <label className="field-label">
+                  Persistent keepalive
+                  <input
+                    className="field-input"
+                    onChange={(event) => updatePeerField("persistentKeepalive", event.target.value)}
+                    placeholder="Ej. 25s"
+                    value={peerForm.persistentKeepalive}
+                  />
+                </label>
+                {peerForm.vpnType !== "remote-access" && (
+                  <label className="field-label">
+                    Distancia de ruta
+                    <input
+                      className="field-input"
+                      max="255"
+                      min="1"
+                      onChange={(event) => updatePeerField("routeDistance", event.target.value)}
+                      type="number"
+                      value={peerForm.routeDistance}
+                    />
+                  </label>
+                )}
+                <label className="field-label">
+                  Comentario
+                  <input
+                    className="field-input"
+                    onChange={(event) => updatePeerField("comment", event.target.value)}
+                    placeholder="Opcional"
+                    value={peerForm.comment}
+                  />
+                </label>
+                <label className="toggle-row">
+                  <input
+                    checked={peerForm.enableFirewall}
+                    onChange={(event) => updatePeerField("enableFirewall", event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Aplicar reglas firewall necesarias</span>
+                </label>
+                <label className="toggle-row">
+                  <input
+                    checked={peerForm.enableNat || peerForm.vpnType === "branch-nat"}
+                    disabled={peerForm.vpnType === "branch-nat"}
+                    onChange={(event) => updatePeerField("enableNat", event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Aplicar NAT/Masquerade</span>
+                </label>
+                <label className="toggle-row">
+                  <input
+                    checked={peerForm.disabled}
+                    onChange={(event) => updatePeerField("disabled", event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Crear peer deshabilitado</span>
+                </label>
+              </div>
+            )}
+          </section>
+
+          <aside className="wizard-preview">
+            <div className="preview-card">
+              <div className="preview-icon">
+                <Wand2 size={20} />
+              </div>
+              <h4>{selectedType.label}</h4>
+              <p>{selectedType.detail}</p>
+            </div>
+
+            <div className="readiness-list">
+              {readiness.map((item) => (
+                <div className={item.ready ? "readiness-item readiness-item-ready" : "readiness-item"} key={item.label}>
+                  <CheckCircle2 size={15} />
+                  <span>{item.label}</span>
+                </div>
               ))}
-            </select>
-          </label>
-          {!peerForm.keyId && (
-            <label className="field-label xl:col-span-2">
-              Llave publica manual
-              <input
-                className="field-input"
-                onChange={(event) => updatePeerField("publicKey", event.target.value)}
-                placeholder="Base64 de 32 bytes"
-                required={!peerForm.keyId}
-                value={peerForm.publicKey}
-              />
-            </label>
-          )}
-          <label className="field-label">
-            Allowed address
-            <input
-              className="field-input"
-              onChange={(event) => updatePeerField("allowedAddress", event.target.value)}
-              placeholder="Ej. 10.70.8.10/32"
-              required
-              value={peerForm.allowedAddress}
-            />
-          </label>
-          {peerForm.vpnType !== "remote-access" && (
-            <label className="field-label">
-              Red remota
-              <input
-                className="field-input"
-                onChange={(event) => updatePeerField("remoteSubnet", event.target.value)}
-                placeholder="Ej. 10.80.0.0/24"
-                required={peerForm.vpnType !== "remote-access"}
-                value={peerForm.remoteSubnet}
-              />
-            </label>
-          )}
-          <label className="field-label">
-            Red local
-            <input
-              className="field-input"
-              onChange={(event) => updatePeerField("localSubnet", event.target.value)}
-              placeholder="Ej. 192.168.20.0/24"
-              value={peerForm.localSubnet}
-            />
-          </label>
-          <label className="field-label">
-            Puerto publico WireGuard
-            <input
-              className="field-input"
-              max="65535"
-              min="1"
-              onChange={(event) => updatePeerField("listenPort", event.target.value)}
-              type="number"
-              value={peerForm.listenPort}
-            />
-          </label>
-          <label className="field-label">
-            Comentario
-            <input
-              className="field-input"
-              onChange={(event) => updatePeerField("comment", event.target.value)}
-              placeholder="Ej. soporte-lima"
-              value={peerForm.comment}
-            />
-          </label>
-          <label className="field-label">
-            Endpoint address
-            <input
-              className="field-input"
-              onChange={(event) => updatePeerField("endpointAddress", event.target.value)}
-              placeholder="Opcional"
-              value={peerForm.endpointAddress}
-            />
-          </label>
-          <label className="field-label">
-            Endpoint port
-            <input
-              className="field-input"
-              max="65535"
-              min="1"
-              onChange={(event) => updatePeerField("endpointPort", event.target.value)}
-              placeholder="Opcional"
-              type="number"
-              value={peerForm.endpointPort}
-            />
-          </label>
-          <label className="field-label">
-            Persistent keepalive
-            <input
-              className="field-input"
-              onChange={(event) => updatePeerField("persistentKeepalive", event.target.value)}
-              placeholder="Ej. 25s"
-              value={peerForm.persistentKeepalive}
-            />
-          </label>
-          {peerForm.vpnType !== "remote-access" && (
-            <label className="field-label">
-              Distancia de ruta
-              <input
-                className="field-input"
-                max="255"
-                min="1"
-                onChange={(event) => updatePeerField("routeDistance", event.target.value)}
-                type="number"
-                value={peerForm.routeDistance}
-              />
-            </label>
-          )}
-          <label className="toggle-row">
-            <input
-              checked={peerForm.enableFirewall}
-              onChange={(event) => updatePeerField("enableFirewall", event.target.checked)}
-              type="checkbox"
-            />
-            <span>Aplicar reglas firewall necesarias</span>
-          </label>
-          <label className="toggle-row">
-            <input
-              checked={peerForm.enableNat || peerForm.vpnType === "branch-nat"}
-              disabled={peerForm.vpnType === "branch-nat"}
-              onChange={(event) => updatePeerField("enableNat", event.target.checked)}
-              type="checkbox"
-            />
-            <span>Aplicar NAT/Masquerade para el tunel</span>
-          </label>
-          <label className="toggle-row self-end">
-            <input
-              checked={peerForm.disabled}
-              onChange={(event) => updatePeerField("disabled", event.target.checked)}
-              type="checkbox"
-            />
-            <span>Crear peer deshabilitado</span>
-          </label>
-        </div>
-        <div className="mt-4 flex justify-end">
-          <button className="primary-button" disabled={isPeerSaving} type="submit">
-            <Plus size={16} />
-            {isPeerSaving ? "Orquestando VPN" : "Crear VPN completa"}
-          </button>
+            </div>
+
+            <div className="automation-box">
+              <p>Se ejecutara</p>
+              {selectedType.automation.map((item) => (
+                <span key={item}>{item}</span>
+              ))}
+            </div>
+
+            <button className="primary-button w-full" disabled={isPeerSaving || !selectedRouter} type="submit">
+              <Plus size={16} />
+              {isPeerSaving ? "Orquestando VPN" : "Crear VPN completa"}
+            </button>
+          </aside>
         </div>
       </form>
 
@@ -433,6 +546,21 @@ function SummaryTile({ label, value }) {
       <p className="mt-1 text-2xl font-semibold">{value}</p>
     </div>
   );
+}
+
+function buildReadiness(form) {
+  const items = [
+    { label: "Tipo elegido", ready: Boolean(form.vpnType) },
+    { label: "Interfaz", ready: Boolean(form.interfaceName) },
+    { label: "IP del peer", ready: Boolean(form.allowedAddress) },
+    { label: "Llave publica", ready: Boolean(form.keyId || form.publicKey) }
+  ];
+
+  if (form.vpnType !== "remote-access") {
+    items.push({ label: "Red remota", ready: Boolean(form.remoteSubnet) });
+  }
+
+  return items;
 }
 
 function formatBytes(value) {
