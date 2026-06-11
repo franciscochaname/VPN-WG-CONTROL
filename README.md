@@ -90,3 +90,13 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego modulo Firewall para sincronizar reglas reales `filter` y `nat` desde RouterOS.
 - Se agrego diagnostico de interferencias que revisa posibles bloqueos en `input`, `forward` y ausencia de NAT para tuneles.
 - Se agregaron presets guiados para permitir API, WireGuard UDP y trafico forward establecido desde la app.
+
+### 2026-06-11
+
+- Se corrigio la carga de assets del build Vite para que Electron desktop renderice correctamente desde `file://`.
+- Se agrego tabla `tb_telemetry_samples` para guardar muestras reales de trafico WireGuard en cada sincronizacion.
+- Se agrego motor inteligente local con modo entrenamiento/baseline, confianza, deteccion de peers sin handshake, routers offline y anomalias de trafico.
+- Se amplio el dashboard con telemetria RX/TX, tasa estimada, muestras reales y panel de hallazgos inteligentes.
+- Se agrego refresco local periodico del dashboard cada 10 segundos sin saturar RouterOS.
+- Se mejoro Firewall con puntuacion de riesgo, resumen por cadenas, filtros visuales y recomendaciones accionables.
+- Se agregaron presets adicionales para WebFig y forward de peers, manteniendo verificacion contra reglas reales sincronizadas.

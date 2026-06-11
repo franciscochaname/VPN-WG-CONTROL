@@ -79,11 +79,36 @@ export async function getDashboardSnapshot() {
 
   return {
     routers: browserRouters,
+    tunnels: [],
+    monitoring: {
+      mode: "training",
+      confidence: 0,
+      sampleCount: 0,
+      latestSampleAt: null,
+      totalRxBytes: 0,
+      totalTxBytes: 0,
+      throughputBps: 0,
+      handshakeMissing: 0,
+      activeTunnels: 0,
+      findings: [
+        {
+          severity: "info",
+          title: "Vista navegador",
+          detail: "El monitoreo real se activa en la app de escritorio con acceso a Electron y RouterOS."
+        }
+      ]
+    },
     metrics: {
       routers: browserRouters.length,
       tunnels: 0,
       events: 0,
-      pendingConnections: browserRouters.filter((router) => router.status === "pending_connection").length
+      pendingConnections: browserRouters.filter((router) => router.status === "pending_connection").length,
+      onlineRouters: 0,
+      offlineRouters: 0,
+      totalRxBytes: 0,
+      totalTxBytes: 0,
+      throughputBps: 0,
+      handshakeMissing: 0
     }
   };
 }

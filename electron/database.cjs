@@ -116,10 +116,25 @@ function initializeDatabase(userDataPath) {
       dst_port TEXT,
       in_interface TEXT,
       out_interface TEXT,
+      connection_state TEXT,
       comment TEXT,
       disabled INTEGER NOT NULL DEFAULT 0,
       raw_json TEXT NOT NULL,
       synced_at TEXT NOT NULL,
+      FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS tb_telemetry_samples (
+      id TEXT PRIMARY KEY,
+      router_id TEXT NOT NULL,
+      tunnel_id TEXT NOT NULL,
+      interface_name TEXT NOT NULL,
+      allowed_address TEXT,
+      rx_bytes INTEGER NOT NULL DEFAULT 0,
+      tx_bytes INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      last_handshake_at TEXT,
+      sampled_at TEXT NOT NULL,
       FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
     );
 
@@ -128,6 +143,8 @@ function initializeDatabase(userDataPath) {
     CREATE INDEX IF NOT EXISTS idx_diagnosticos_router_id ON tb_diagnosticos(router_id);
     CREATE INDEX IF NOT EXISTS idx_wireguard_keys_router_id ON tb_wireguard_keys(assigned_router_id);
     CREATE INDEX IF NOT EXISTS idx_firewall_rules_router_id ON tb_firewall_rules(router_id);
+    CREATE INDEX IF NOT EXISTS idx_telemetry_samples_router_id ON tb_telemetry_samples(router_id);
+    CREATE INDEX IF NOT EXISTS idx_telemetry_samples_tunnel_id ON tb_telemetry_samples(tunnel_id);
   `);
   runMigrations();
 }
@@ -376,21 +393,261 @@ async function syncWireGuard(routerId) {
 function getDashboardSnapshot() {
   assertDatabase();
   const routers = listRouters();
+  const tunnels = listWireGuardTunnels();
   const tunnelCount = db.prepare("SELECT COUNT(*) AS total FROM tb_tuneles").get().total;
   const eventCount = db.prepare("SELECT COUNT(*) AS total FROM tb_logs_eventos").get().total;
+  const monitoring = buildMonitoringSnapshot(routers, tunnels);
 
   return {
     routers,
-    tunnels: listWireGuardTunnels(),
+    tunnels,
+    monitoring,
     metrics: {
       routers: routers.length,
       tunnels: tunnelCount,
       events: eventCount,
       pendingConnections: routers.filter((router) => router.status === "pending_connection").length,
       onlineRouters: routers.filter((router) => router.status === "online").length,
-      offlineRouters: routers.filter((router) => router.status === "offline").length
+      offlineRouters: routers.filter((router) => router.status === "offline").length,
+      totalRxBytes: monitoring.totalRxBytes,
+      totalTxBytes: monitoring.totalTxBytes,
+      throughputBps: monitoring.throughputBps,
+      handshakeMissing: monitoring.handshakeMissing
     }
   };
+}
+
+function buildMonitoringSnapshot(routers, tunnels) {
+  const samples = db
+    .prepare(`
+      SELECT
+        router_id AS routerId,
+        tunnel_id AS tunnelId,
+        rx_bytes AS rxBytes,
+        tx_bytes AS txBytes,
+        status,
+        sampled_at AS sampledAt
+      FROM tb_telemetry_samples
+      ORDER BY sampled_at DESC
+      LIMIT 600
+    `)
+    .all()
+    .map((row) => ({
+      ...row,
+      rxBytes: Number(row.rxBytes || 0),
+      txBytes: Number(row.txBytes || 0)
+    }));
+  const sampleStats = db.prepare("SELECT COUNT(*) AS total, MAX(sampled_at) AS latestSampleAt FROM tb_telemetry_samples").get();
+  const findings = [];
+  const offlineRouters = routers.filter((router) => router.status === "offline");
+  const pendingRouters = routers.filter((router) => router.status === "pending_connection");
+  const staleRouters = routers.filter((router) => router.lastSyncAt && minutesSince(router.lastSyncAt) > 5);
+  const handshakeMissing = tunnels.filter((tunnel) => tunnel.status !== "interface_only" && !tunnel.lastHandshakeAt).length;
+  const totalRxBytes = tunnels.reduce((total, tunnel) => total + Number(tunnel.rxBytes || 0), 0);
+  const totalTxBytes = tunnels.reduce((total, tunnel) => total + Number(tunnel.txBytes || 0), 0);
+  const throughputBps = calculateThroughput(samples);
+  const anomalyFindings = detectTelemetryAnomalies(samples, tunnels);
+  const firewallWarnings = routers.flatMap((router) =>
+    listFirewall(router.id).findings.filter((finding) => finding.severity === "warning" || finding.severity === "error")
+  );
+
+  if (routers.length === 0) {
+    findings.push({
+      severity: "info",
+      title: "Sin routers para monitorear",
+      detail: "El entrenamiento inteligente inicia cuando registres y sincronices un router real."
+    });
+  }
+
+  if (pendingRouters.length > 0) {
+    findings.push({
+      severity: "warning",
+      title: "Routers sin validar",
+      detail: `${pendingRouters.length} router(s) estan pendientes de prueba API antes de monitorear tuneles.`
+    });
+  }
+
+  if (offlineRouters.length > 0) {
+    findings.push({
+      severity: "error",
+      title: "Routers offline",
+      detail: `${offlineRouters.length} router(s) no respondieron en la ultima prueba o sincronizacion.`
+    });
+  }
+
+  if (staleRouters.length > 0) {
+    findings.push({
+      severity: "warning",
+      title: "Telemetria desactualizada",
+      detail: `${staleRouters.length} router(s) tienen mas de 5 minutos sin sincronizar WireGuard.`
+    });
+  }
+
+  if (handshakeMissing > 0) {
+    findings.push({
+      severity: "warning",
+      title: "Peers sin handshake",
+      detail: `${handshakeMissing} peer(s) no reportan ultimo handshake en la lectura real.`
+    });
+  }
+
+  if (firewallWarnings.length > 0) {
+    findings.push({
+      severity: "warning",
+      title: "Firewall puede interferir",
+      detail: `${firewallWarnings.length} hallazgo(s) de firewall requieren revision antes de asumir falla del tunel.`
+    });
+  }
+
+  findings.push(...anomalyFindings);
+
+  if (findings.length === 0 && tunnels.length > 0) {
+    findings.push({
+      severity: "ok",
+      title: "Monitoreo sin anomalias evidentes",
+      detail: "Los tuneles sincronizados no muestran bloqueos ni cambios de trafico fuera del baseline local."
+    });
+  }
+
+  return {
+    updatedAt: new Date().toISOString(),
+    latestSampleAt: sampleStats.latestSampleAt || null,
+    sampleCount: Number(sampleStats.total || 0),
+    confidence: calculateMonitoringConfidence(Number(sampleStats.total || 0), tunnels.length),
+    mode: Number(sampleStats.total || 0) >= Math.max(8, tunnels.length * 4) ? "baseline" : "training",
+    totalRxBytes,
+    totalTxBytes,
+    throughputBps,
+    handshakeMissing,
+    activeTunnels: tunnels.filter((tunnel) => tunnel.lastHandshakeAt).length,
+    findings
+  };
+}
+
+function calculateThroughput(samples) {
+  const grouped = groupSamplesByTunnel(samples);
+  let bytesPerSecond = 0;
+
+  for (const tunnelSamples of grouped.values()) {
+    if (tunnelSamples.length < 2) {
+      continue;
+    }
+
+    const [latest, previous] = tunnelSamples;
+    const seconds = secondsBetween(latest.sampledAt, previous.sampledAt);
+    const delta = byteDelta(latest, previous);
+
+    if (seconds > 0 && delta >= 0) {
+      bytesPerSecond += delta / seconds;
+    }
+  }
+
+  return Math.round(bytesPerSecond);
+}
+
+function detectTelemetryAnomalies(samples, tunnels) {
+  const grouped = groupSamplesByTunnel(samples);
+  const findings = [];
+  let trainingTunnels = 0;
+
+  for (const tunnel of tunnels) {
+    const tunnelSamples = grouped.get(tunnel.id) || [];
+
+    if (tunnelSamples.length > 0 && tunnelSamples.length < 6) {
+      trainingTunnels += 1;
+      continue;
+    }
+
+    if (tunnelSamples.length < 6) {
+      continue;
+    }
+
+    const currentDelta = byteDelta(tunnelSamples[0], tunnelSamples[1]);
+    const baseline = [];
+
+    for (let index = 1; index < tunnelSamples.length - 1; index += 1) {
+      const delta = byteDelta(tunnelSamples[index], tunnelSamples[index + 1]);
+
+      if (delta >= 0) {
+        baseline.push(delta);
+      }
+    }
+
+    const average = baseline.reduce((total, delta) => total + delta, 0) / Math.max(1, baseline.length);
+
+    if (average > 0 && currentDelta > average * 3 && currentDelta > 50000) {
+      findings.push({
+        severity: "warning",
+        title: "Pico de trafico WireGuard",
+        detail: `${tunnel.allowedAddress || tunnel.interfaceName} supera 3x su baseline local de trafico.`
+      });
+    }
+
+    if (average > 10000 && currentDelta === 0) {
+      findings.push({
+        severity: "warning",
+        title: "Tunel en silencio",
+        detail: `${tunnel.allowedAddress || tunnel.interfaceName} tenia trafico habitual y la ultima muestra no aumento bytes.`
+      });
+    }
+  }
+
+  if (trainingTunnels > 0) {
+    findings.push({
+      severity: "training",
+      title: "Baseline en entrenamiento",
+      detail: `${trainingTunnels} tunel(es) necesitan al menos 6 muestras reales para detectar anomalias de trafico.`
+    });
+  }
+
+  return findings;
+}
+
+function groupSamplesByTunnel(samples) {
+  const grouped = new Map();
+
+  for (const sample of samples) {
+    if (!grouped.has(sample.tunnelId)) {
+      grouped.set(sample.tunnelId, []);
+    }
+
+    grouped.get(sample.tunnelId).push(sample);
+  }
+
+  return grouped;
+}
+
+function byteDelta(latest, previous) {
+  return latest.rxBytes + latest.txBytes - previous.rxBytes - previous.txBytes;
+}
+
+function secondsBetween(latestIso, previousIso) {
+  const latest = Date.parse(latestIso);
+  const previous = Date.parse(previousIso);
+
+  if (!Number.isFinite(latest) || !Number.isFinite(previous)) {
+    return 0;
+  }
+
+  return Math.max(0, (latest - previous) / 1000);
+}
+
+function minutesSince(isoDate) {
+  const timestamp = Date.parse(isoDate);
+
+  if (!Number.isFinite(timestamp)) {
+    return 0;
+  }
+
+  return (Date.now() - timestamp) / 60000;
+}
+
+function calculateMonitoringConfidence(sampleCount, tunnelCount) {
+  if (tunnelCount === 0) {
+    return sampleCount > 0 ? 20 : 0;
+  }
+
+  return Math.min(95, Math.round((sampleCount / Math.max(8, tunnelCount * 6)) * 100));
 }
 
 function getSecurityHealth() {
@@ -622,6 +879,7 @@ function listFirewall(routerId) {
         dst_port AS dstPort,
         in_interface AS inInterface,
         out_interface AS outInterface,
+        connection_state AS connectionState,
         comment,
         disabled,
         synced_at AS syncedAt
@@ -675,12 +933,13 @@ function replaceFirewallRules(routerId, tableName, rows, syncedAt) {
       dst_port,
       in_interface,
       out_interface,
+      connection_state,
       comment,
       disabled,
       raw_json,
       synced_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   db.exec("BEGIN");
@@ -701,6 +960,7 @@ function replaceFirewallRules(routerId, tableName, rows, syncedAt) {
         row["dst-port"] || null,
         row["in-interface"] || null,
         row["out-interface"] || null,
+        row["connection-state"] || null,
         row.comment || null,
         row.disabled === "true" ? 1 : 0,
         JSON.stringify(row),
@@ -803,6 +1063,30 @@ function buildFirewallPresetRule(router, preset, payload) {
       dstPort: String(wireGuardPort),
       srcAddress,
       comment: `Allow WireGuard UDP ${commentSuffix}`
+    };
+  }
+
+  if (preset === "allow-webfig") {
+    return {
+      chain: "input",
+      action: "accept",
+      protocol: "tcp",
+      dstPort: String(router.webfigPort),
+      srcAddress,
+      comment: `Allow WebFig ${commentSuffix}`
+    };
+  }
+
+  if (preset === "allow-forward-peer") {
+    if (!srcAddress) {
+      throw new Error("Ingresa el allowed-address del peer para permitir forward.");
+    }
+
+    return {
+      chain: "forward",
+      action: "accept",
+      srcAddress,
+      comment: `Allow peer forward ${commentSuffix}`
     };
   }
 
@@ -1056,10 +1340,48 @@ function replaceWireGuardTunnels(routerId, state, now) {
         row.updatedAt
       );
     }
+    insertTelemetrySamples(routerId, rows, now);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
+  }
+}
+
+function insertTelemetrySamples(routerId, rows, sampledAt) {
+  if (rows.length === 0) {
+    return;
+  }
+
+  const statement = db.prepare(`
+    INSERT INTO tb_telemetry_samples (
+      id,
+      router_id,
+      tunnel_id,
+      interface_name,
+      allowed_address,
+      rx_bytes,
+      tx_bytes,
+      status,
+      last_handshake_at,
+      sampled_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const row of rows) {
+    statement.run(
+      randomUUID(),
+      routerId,
+      row.id,
+      row.interfaceName,
+      row.allowedAddress,
+      row.rxBytes,
+      row.txBytes,
+      row.status,
+      row.lastHandshakeAt,
+      sampledAt
+    );
   }
 }
 
@@ -1211,6 +1533,7 @@ function runMigrations() {
   ensureColumn("tb_config_router", "router_identity", "TEXT");
   ensureColumn("tb_config_router", "router_version", "TEXT");
   ensureColumn("tb_config_router", "last_sync_at", "TEXT");
+  ensureColumn("tb_firewall_rules", "connection_state", "TEXT");
 }
 
 function getLatestDiagnostics(routerId) {

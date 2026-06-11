@@ -311,6 +311,123 @@ button {
   box-shadow: 0 12px 26px rgba(76, 54, 32, 0.1);
 }
 
+.telemetry-tile {
+  display: grid;
+  min-height: 112px;
+  align-content: space-between;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  color: #73695f;
+  padding: 13px;
+}
+
+.telemetry-tile svg {
+  color: #c66a38;
+}
+
+.telemetry-tile span {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.telemetry-tile strong {
+  color: #2a2520;
+  font-size: 1.35rem;
+  font-weight: 850;
+}
+
+.monitor-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  color: #73695f;
+  font-size: 0.84rem;
+  font-weight: 750;
+  padding: 11px 12px;
+}
+
+.monitor-strip strong {
+  color: #2a2520;
+}
+
+.ai-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 850;
+  padding: 6px 9px;
+}
+
+.ai-mode-training {
+  background: #fff1d6;
+  color: #9b6220;
+}
+
+.ai-mode-baseline {
+  background: #edf5ef;
+  color: #3d7c66;
+}
+
+.confidence-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f4ead9;
+}
+
+.confidence-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #c66a38, #4d9078);
+  transition: width 260ms ease;
+}
+
+.insight-row {
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  padding: 11px 12px;
+}
+
+.insight-row p {
+  color: #2a2520;
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
+.insight-row span {
+  display: block;
+  margin-top: 4px;
+  color: #73695f;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.insight-row-ok {
+  background: #edf5ef;
+}
+
+.insight-row-training,
+.insight-row-info {
+  background: #fffdf8;
+}
+
+.insight-row-warning {
+  background: #fff1d6;
+}
+
+.insight-row-error {
+  background: #fff1ed;
+}
+
 .router-list-item {
   display: flex;
   width: 100%;
@@ -622,6 +739,141 @@ button {
 .finding-card-error {
   background: #fff1ed;
   color: #a94727;
+}
+
+.risk-meter {
+  display: grid;
+  min-height: 118px;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+}
+
+.risk-meter strong {
+  color: #2a2520;
+  font-size: 2.7rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.risk-meter span {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 850;
+  padding: 5px 9px;
+}
+
+.risk-meter-low span {
+  background: #edf5ef;
+  color: #3d7c66;
+}
+
+.risk-meter-medium span {
+  background: #fff1d6;
+  color: #9b6220;
+}
+
+.risk-meter-high span {
+  background: #fff1ed;
+  color: #a94727;
+}
+
+.recommendation-card {
+  display: flex;
+  min-height: 88px;
+  gap: 10px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: #c66a38;
+  padding: 12px;
+}
+
+.recommendation-card p {
+  color: #2a2520;
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
+.recommendation-card span {
+  display: block;
+  margin-top: 4px;
+  color: #73695f;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.chain-tile {
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 13px;
+}
+
+.chain-tile p {
+  color: #73695f;
+  font-size: 0.82rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.chain-tile strong {
+  color: #2a2520;
+  font-size: 1.5rem;
+}
+
+.chain-pill {
+  border-radius: 999px;
+  background: #f4ead9;
+  color: #73695f;
+  padding: 5px 7px;
+  text-align: center;
+}
+
+.chain-pill-ok {
+  background: #edf5ef;
+  color: #3d7c66;
+}
+
+.chain-pill-warn {
+  background: #fff1ed;
+  color: #a94727;
+}
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 10px 12px;
+}
+
+.filter-tabs {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.filter-tab {
+  min-height: 32px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: #73695f;
+  font-size: 0.78rem;
+  font-weight: 850;
+  padding: 0 10px;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease;
+}
+
+.filter-tab-active,
+.filter-tab:hover {
+  border-color: #e5a23a;
+  background: #f4ead9;
+  color: #2a2520;
 }
 
 .key-card {

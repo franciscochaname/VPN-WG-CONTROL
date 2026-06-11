@@ -1,4 +1,4 @@
-import { Flame, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Flame, Gauge, ListFilter, RefreshCw, ShieldAlert, ShieldCheck, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { applyFirewallPreset, listFirewall, syncFirewall } from "../../shared/api/firewallStore.js";
 
@@ -10,14 +10,19 @@ const initialPreset = {
 
 const presetLabels = {
   "allow-api": "Permitir API de gestion",
+  "allow-webfig": "Permitir WebFig",
   "allow-wireguard": "Permitir WireGuard UDP",
+  "allow-forward-peer": "Permitir forward de peer",
   "allow-forward-established": "Permitir forward establecido"
 };
+
+const chainFilters = ["todo", "input", "forward", "nat"];
 
 function FirewallCenter({ selectedRouter }) {
   const [rules, setRules] = useState([]);
   const [findings, setFindings] = useState([]);
   const [presetForm, setPresetForm] = useState(initialPreset);
+  const [chainFilter, setChainFilter] = useState("todo");
   const [isLoading, setIsLoading] = useState(true);
   const [busyAction, setBusyAction] = useState(null);
   const [message, setMessage] = useState({ type: "idle", text: "" });
@@ -25,6 +30,18 @@ function FirewallCenter({ selectedRouter }) {
   const selectedRouterId = selectedRouter?.id || null;
   const visibleRules = useMemo(() => rules.filter((rule) => rule.tableName === "filter"), [rules]);
   const natRules = useMemo(() => rules.filter((rule) => rule.tableName === "nat"), [rules]);
+  const displayedRules = useMemo(() => {
+    if (chainFilter === "todo") {
+      return rules;
+    }
+
+    if (chainFilter === "nat") {
+      return rules.filter((rule) => rule.tableName === "nat");
+    }
+
+    return rules.filter((rule) => rule.chain === chainFilter);
+  }, [chainFilter, rules]);
+  const firewallInsight = useMemo(() => buildFirewallInsight(rules, findings), [rules, findings]);
 
   async function refreshLocalFirewall() {
     setIsLoading(true);
@@ -154,7 +171,7 @@ function FirewallCenter({ selectedRouter }) {
               <input
                 className="field-input"
                 onChange={(event) => setPresetForm((current) => ({ ...current, srcAddress: event.target.value }))}
-                placeholder="Opcional, ej. 192.168.216.13/32"
+                placeholder={presetForm.preset === "allow-forward-peer" ? "Allowed address del peer" : "Opcional, ej. 192.168.216.13/32"}
                 value={presetForm.srcAddress}
               />
             </label>
@@ -179,10 +196,48 @@ function FirewallCenter({ selectedRouter }) {
         </form>
       </div>
 
+      <div className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-[290px_minmax(0,1fr)]">
+        <section className="rounded-lg border border-warm-line bg-[#fff9ef] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Gauge size={18} className="text-warm-copper" />
+            <h3 className="font-semibold">Riesgo firewall</h3>
+          </div>
+          <div className={`risk-meter risk-meter-${firewallInsight.level}`}>
+            <strong>{firewallInsight.score}</strong>
+            <span>{firewallInsight.label}</span>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-warm-muted">{firewallInsight.summary}</p>
+        </section>
+
+        <section className="rounded-lg border border-warm-line bg-[#fff9ef] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Wand2 size={18} className="text-warm-copper" />
+            <h3 className="font-semibold">Acciones sugeridas</h3>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {firewallInsight.actions.map((action) => (
+              <article className="recommendation-card" key={action.title}>
+                <AlertTriangle size={16} />
+                <div>
+                  <p>{action.title}</p>
+                  <span>{action.detail}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
         <SummaryTile label="Filter" value={String(visibleRules.length)} />
         <SummaryTile label="NAT" value={String(natRules.length)} />
         <SummaryTile label="Hallazgos" value={String(findings.length)} />
+      </div>
+
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {firewallInsight.chains.map((chain) => (
+          <ChainTile chain={chain} key={chain.label} />
+        ))}
       </div>
 
       {rules.length === 0 ? (
@@ -193,6 +248,24 @@ function FirewallCenter({ selectedRouter }) {
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-warm-line">
+          <div className="table-toolbar">
+            <div className="flex items-center gap-2 text-sm font-semibold text-warm-muted">
+              <ListFilter size={16} />
+              Reglas visibles
+            </div>
+            <div className="filter-tabs">
+              {chainFilters.map((filter) => (
+                <button
+                  className={chainFilter === filter ? "filter-tab filter-tab-active" : "filter-tab"}
+                  key={filter}
+                  onClick={() => setChainFilter(filter)}
+                  type="button"
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+          </div>
           <table className="data-table">
             <thead>
               <tr>
@@ -200,13 +273,13 @@ function FirewallCenter({ selectedRouter }) {
                 <th>#</th>
                 <th>Chain</th>
                 <th>Action</th>
-                <th>Proto/Port</th>
+                <th>Proto/Port/State</th>
                 <th>Origen/Destino</th>
                 <th>Comentario</th>
               </tr>
             </thead>
             <tbody>
-              {rules.map((rule) => (
+              {displayedRules.map((rule) => (
                 <tr key={rule.id}>
                   <td>{rule.tableName}</td>
                   <td>{rule.orderIndex + 1}</td>
@@ -216,7 +289,7 @@ function FirewallCenter({ selectedRouter }) {
                       {rule.disabled ? "disabled" : rule.action || "Sin dato"}
                     </span>
                   </td>
-                  <td>{[rule.protocol, rule.dstPort].filter(Boolean).join(" / ") || "Sin dato"}</td>
+                  <td>{[rule.protocol, rule.dstPort, rule.connectionState].filter(Boolean).join(" / ") || "Sin dato"}</td>
                   <td>
                     <b>{rule.srcAddress || "any"}</b>
                     <span>{rule.dstAddress || "any"}</span>
@@ -229,6 +302,68 @@ function FirewallCenter({ selectedRouter }) {
         </div>
       )}
     </section>
+  );
+}
+
+function buildFirewallInsight(rules, findings) {
+  const activeRules = rules.filter((rule) => !rule.disabled);
+  const dropRules = activeRules.filter((rule) => rule.action === "drop" || rule.action === "reject");
+  const warningFindings = findings.filter((finding) => finding.severity === "warning" || finding.severity === "error");
+  const score = Math.min(100, warningFindings.length * 28 + dropRules.length * 4 + rules.filter((rule) => rule.disabled).length * 2);
+  const level = score >= 70 ? "high" : score >= 35 ? "medium" : "low";
+  const chains = ["input", "forward", "output", "nat"].map((chain) => {
+    const chainRules = chain === "nat" ? rules.filter((rule) => rule.tableName === "nat") : rules.filter((rule) => rule.chain === chain);
+
+    return {
+      label: chain,
+      total: chainRules.length,
+      accept: chainRules.filter((rule) => rule.action === "accept").length,
+      drop: chainRules.filter((rule) => rule.action === "drop" || rule.action === "reject").length,
+      disabled: chainRules.filter((rule) => rule.disabled).length
+    };
+  });
+  const actions = warningFindings.length > 0
+    ? warningFindings.map((finding) => ({
+        title: finding.title,
+        detail: finding.detail
+      }))
+    : [
+        {
+          title: "Mantener orden de reglas",
+          detail: "Las reglas allow para API, WireGuard y forward deben quedar antes de drops generales."
+        },
+        {
+          title: "Sincronizar despues de cambios",
+          detail: "Cada preset aplicado vuelve a leer RouterOS para verificar el estado real."
+        }
+      ];
+
+  return {
+    score,
+    level,
+    label: level === "high" ? "alto" : level === "medium" ? "medio" : "bajo",
+    summary:
+      rules.length === 0
+        ? "Sin reglas reales sincronizadas todavia. La puntuacion se calculara despues de leer RouterOS."
+        : `${dropRules.length} regla(s) drop/reject activas y ${warningFindings.length} hallazgo(s) pueden afectar administracion o tuneles.`,
+    actions: actions.slice(0, 4),
+    chains
+  };
+}
+
+function ChainTile({ chain }) {
+  return (
+    <article className="chain-tile">
+      <div className="flex items-center justify-between gap-2">
+        <p>{chain.label}</p>
+        <strong>{chain.total}</strong>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2 text-xs font-semibold">
+        <span className="chain-pill chain-pill-ok">{chain.accept} allow</span>
+        <span className="chain-pill chain-pill-warn">{chain.drop} drop</span>
+        <span className="chain-pill">{chain.disabled} off</span>
+      </div>
+    </article>
   );
 }
 

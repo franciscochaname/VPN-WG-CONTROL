@@ -26,7 +26,22 @@ function App() {
     events: 0,
     pendingConnections: 0,
     onlineRouters: 0,
-    offlineRouters: 0
+    offlineRouters: 0,
+    totalRxBytes: 0,
+    totalTxBytes: 0,
+    throughputBps: 0,
+    handshakeMissing: 0
+  });
+  const [monitoring, setMonitoring] = useState({
+    mode: "training",
+    confidence: 0,
+    sampleCount: 0,
+    totalRxBytes: 0,
+    totalTxBytes: 0,
+    throughputBps: 0,
+    handshakeMissing: 0,
+    activeTunnels: 0,
+    findings: []
   });
   const [selectedRouterId, setSelectedRouterId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -36,13 +51,27 @@ function App() {
     [routers, selectedRouterId]
   );
 
-  const refreshWorkspace = useCallback(async function refreshWorkspace() {
-    setIsLoading(true);
+  const refreshWorkspace = useCallback(async function refreshWorkspace(options = {}) {
+    if (!options.silent) {
+      setIsLoading(true);
+    }
+
     try {
       const snapshot = await getDashboardSnapshot();
       setRouters(snapshot.routers);
       setTunnels(snapshot.tunnels || []);
       setMetrics(snapshot.metrics);
+      setMonitoring(snapshot.monitoring || {
+        mode: "training",
+        confidence: 0,
+        sampleCount: 0,
+        totalRxBytes: 0,
+        totalTxBytes: 0,
+        throughputBps: 0,
+        handshakeMissing: 0,
+        activeTunnels: 0,
+        findings: []
+      });
       setSelectedRouterId((currentId) => {
         if (snapshot.routers.some((router) => router.id === currentId)) {
           return currentId;
@@ -51,7 +80,9 @@ function App() {
         return snapshot.routers[0]?.id || null;
       });
     } finally {
-      setIsLoading(false);
+      if (!options.silent) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -71,6 +102,7 @@ function App() {
     setRouters(snapshot.routers);
     setTunnels(snapshot.tunnels || []);
     setMetrics(snapshot.metrics);
+    setMonitoring(snapshot.monitoring || monitoring);
     return snapshot;
   }
 
@@ -82,6 +114,14 @@ function App() {
 
   useEffect(() => {
     refreshWorkspace();
+  }, [refreshWorkspace]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      refreshWorkspace({ silent: true });
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
   }, [refreshWorkspace]);
 
   return (
@@ -96,6 +136,7 @@ function App() {
             activeView={activeView}
             isLoading={isLoading}
             metrics={metrics}
+            monitoring={monitoring}
             routers={routers}
             tunnels={tunnels}
             selectedRouter={selectedRouter}
@@ -123,6 +164,7 @@ function ContentView({
   activeView,
   isLoading,
   metrics,
+  monitoring,
   routers,
   tunnels,
   selectedRouter,
@@ -154,9 +196,11 @@ function ContentView({
     <Dashboard
       isLoading={isLoading}
       metrics={metrics}
+      monitoring={monitoring}
       routers={routers}
       tunnels={tunnels}
       selectedRouter={selectedRouter}
+      onSyncSelectedRouter={selectedRouter ? () => onSyncWireGuard(selectedRouter.id) : null}
       onOpenRouterRegistration={onOpenRouterRegistration}
     />
   );
