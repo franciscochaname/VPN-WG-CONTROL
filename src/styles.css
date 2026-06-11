@@ -593,6 +593,37 @@ button {
   padding: 5px 8px;
 }
 
+.inline-status-warn {
+  background: #fff1ed;
+  color: #a94727 !important;
+}
+
+.finding-card {
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  padding: 12px;
+}
+
+.finding-card-ok {
+  background: #edf5ef;
+  color: #3d7c66;
+}
+
+.finding-card-info {
+  background: #fffdf8;
+  color: #73695f;
+}
+
+.finding-card-warning {
+  background: #fff1d6;
+  color: #8a5a20;
+}
+
+.finding-card-error {
+  background: #fff1ed;
+  color: #a94727;
+}
+
 .key-card {
   display: flex;
   align-items: flex-start;

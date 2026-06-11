@@ -3,7 +3,13 @@ const { createHash, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
-const { addWireGuardPeer, fetchWireGuardState, testRouterConnection } = require("./routerosClient.cjs");
+const {
+  addFirewallFilterRule,
+  addWireGuardPeer,
+  fetchFirewallState,
+  fetchWireGuardState,
+  testRouterConnection
+} = require("./routerosClient.cjs");
 const { diagnoseRouterServices } = require("./serviceDiagnostics.cjs");
 const { generateWireGuardKeyPair } = require("./wireguardKeys.cjs");
 
@@ -96,10 +102,32 @@ function initializeDatabase(userDataPath) {
       FOREIGN KEY (assigned_tunnel_id) REFERENCES tb_tuneles(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS tb_firewall_rules (
+      id TEXT PRIMARY KEY,
+      router_id TEXT NOT NULL,
+      table_name TEXT NOT NULL,
+      rule_id TEXT,
+      order_index INTEGER NOT NULL,
+      chain TEXT,
+      action TEXT,
+      protocol TEXT,
+      src_address TEXT,
+      dst_address TEXT,
+      dst_port TEXT,
+      in_interface TEXT,
+      out_interface TEXT,
+      comment TEXT,
+      disabled INTEGER NOT NULL DEFAULT 0,
+      raw_json TEXT NOT NULL,
+      synced_at TEXT NOT NULL,
+      FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tuneles_router_id ON tb_tuneles(router_id);
     CREATE INDEX IF NOT EXISTS idx_logs_router_id ON tb_logs_eventos(router_id);
     CREATE INDEX IF NOT EXISTS idx_diagnosticos_router_id ON tb_diagnosticos(router_id);
     CREATE INDEX IF NOT EXISTS idx_wireguard_keys_router_id ON tb_wireguard_keys(assigned_router_id);
+    CREATE INDEX IF NOT EXISTS idx_firewall_rules_router_id ON tb_firewall_rules(router_id);
   `);
   runMigrations();
 }
@@ -118,6 +146,9 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("wireguard-keys:list", () => listWireGuardKeys());
   ipcMain.handle("wireguard-keys:generate", (_event, payload) => createWireGuardKey(payload));
   ipcMain.handle("wireguard-keys:remove", (_event, keyId) => removeWireGuardKey(keyId));
+  ipcMain.handle("firewall:list", (_event, routerId) => listFirewall(routerId));
+  ipcMain.handle("firewall:sync", (_event, routerId) => syncFirewall(routerId));
+  ipcMain.handle("firewall:apply-preset", (_event, payload) => applyFirewallPreset(payload));
 }
 
 function listRouters() {
@@ -544,6 +575,301 @@ function listWireGuardTunnels(routerId) {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt
     }));
+}
+
+async function syncFirewall(routerId) {
+  assertDatabase();
+  const router = getRouterWithSecret(routerId);
+
+  try {
+    const state = await fetchFirewallState(toConnectionConfig(router));
+    const now = new Date().toISOString();
+
+    replaceFirewallRules(routerId, "filter", state.filter, now);
+    replaceFirewallRules(routerId, "nat", state.nat, now);
+    insertLog(routerId, "firewall-sync", "info", `Firewall sincronizado: ${state.filter.length} filter, ${state.nat.length} nat.`);
+
+    return listFirewall(routerId);
+  } catch (error) {
+    markRouterOffline(routerId, error.message);
+    throw error;
+  }
+}
+
+function listFirewall(routerId) {
+  assertDatabase();
+
+  if (!routerId) {
+    return {
+      rules: [],
+      findings: []
+    };
+  }
+
+  const rules = db
+    .prepare(`
+      SELECT
+        id,
+        router_id AS routerId,
+        table_name AS tableName,
+        rule_id AS ruleId,
+        order_index AS orderIndex,
+        chain,
+        action,
+        protocol,
+        src_address AS srcAddress,
+        dst_address AS dstAddress,
+        dst_port AS dstPort,
+        in_interface AS inInterface,
+        out_interface AS outInterface,
+        comment,
+        disabled,
+        synced_at AS syncedAt
+      FROM tb_firewall_rules
+      WHERE router_id = ?
+      ORDER BY table_name, order_index
+    `)
+    .all(routerId)
+    .map((row) => ({
+      ...row,
+      disabled: Boolean(row.disabled)
+    }));
+
+  return {
+    rules,
+    findings: analyzeFirewall(routerId, rules)
+  };
+}
+
+async function applyFirewallPreset(payload = {}) {
+  assertDatabase();
+  const routerId = cleanText(payload.routerId);
+  const preset = cleanText(payload.preset);
+  const router = getRouterWithSecret(routerId);
+  const rule = buildFirewallPresetRule(router, preset, payload);
+
+  try {
+    await addFirewallFilterRule(toConnectionConfig(router), rule);
+    insertLog(routerId, "firewall-apply", "info", `Regla firewall aplicada: ${rule.comment}.`);
+    return await syncFirewall(routerId);
+  } catch (error) {
+    markRouterOffline(routerId, error.message);
+    throw error;
+  }
+}
+
+function replaceFirewallRules(routerId, tableName, rows, syncedAt) {
+  const deleteStatement = db.prepare("DELETE FROM tb_firewall_rules WHERE router_id = ? AND table_name = ?");
+  const insertStatement = db.prepare(`
+    INSERT INTO tb_firewall_rules (
+      id,
+      router_id,
+      table_name,
+      rule_id,
+      order_index,
+      chain,
+      action,
+      protocol,
+      src_address,
+      dst_address,
+      dst_port,
+      in_interface,
+      out_interface,
+      comment,
+      disabled,
+      raw_json,
+      synced_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  db.exec("BEGIN");
+  try {
+    deleteStatement.run(routerId, tableName);
+    rows.forEach((row, index) => {
+      insertStatement.run(
+        randomUUID(),
+        routerId,
+        tableName,
+        row[".id"] || null,
+        index,
+        row.chain || null,
+        row.action || null,
+        row.protocol || null,
+        row["src-address"] || null,
+        row["dst-address"] || null,
+        row["dst-port"] || null,
+        row["in-interface"] || null,
+        row["out-interface"] || null,
+        row.comment || null,
+        row.disabled === "true" ? 1 : 0,
+        JSON.stringify(row),
+        syncedAt
+      );
+    });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function analyzeFirewall(routerId, rules) {
+  const router = listRouters().find((item) => item.id === routerId);
+  const tunnels = listWireGuardTunnels(routerId);
+  const findings = [];
+  const filterRules = rules.filter((rule) => rule.tableName === "filter" && !rule.disabled);
+  const natRules = rules.filter((rule) => rule.tableName === "nat" && !rule.disabled);
+  const firstInputDrop = filterRules.findIndex((rule) => rule.chain === "input" && isDropAction(rule.action));
+  const firstForwardDrop = filterRules.findIndex((rule) => rule.chain === "forward" && isDropAction(rule.action));
+
+  if (router && firstInputDrop !== -1 && !hasAcceptBefore(filterRules, firstInputDrop, {
+    chain: "input",
+    protocol: "tcp",
+    dstPort: String(router.apiPort)
+  })) {
+    findings.push({
+      severity: "warning",
+      title: "API puede estar bloqueada",
+      detail: `Hay un drop/reject en input antes de una regla accept para TCP ${router.apiPort}. Esto puede impedir que la app gestione el router.`
+    });
+  }
+
+  const wireGuardPortFindings = findWireGuardPortCandidates(filterRules);
+  if (firstInputDrop !== -1 && wireGuardPortFindings.length === 0) {
+    findings.push({
+      severity: "info",
+      title: "Puerto WireGuard no identificado",
+      detail: "No se encontro una regla accept UDP para WireGuard antes de los drops de input. Si los clientes no conectan, agrega una regla allow para el puerto listen del tunel."
+    });
+  }
+
+  if (tunnels.length > 0 && firstForwardDrop !== -1) {
+    const missingForward = tunnels.filter((tunnel) => !hasForwardAcceptForAddress(filterRules, firstForwardDrop, tunnel.allowedAddress));
+
+    if (missingForward.length > 0) {
+      findings.push({
+        severity: "warning",
+        title: "Forward puede limitar tuneles",
+        detail: `${missingForward.length} allowed-address no tienen accept claro antes del primer drop/reject en forward.`
+      });
+    }
+  }
+
+  if (tunnels.length > 0 && !natRules.some((rule) => rule.chain === "srcnat" && ["masquerade", "src-nat"].includes(rule.action))) {
+    findings.push({
+      severity: "info",
+      title: "NAT no detectado",
+      detail: "No hay srcnat masquerade/src-nat activo. Si los peers necesitan salir a internet o redes no enrutadas, revisa NAT o rutas."
+    });
+  }
+
+  if (findings.length === 0 && rules.length > 0) {
+    findings.push({
+      severity: "ok",
+      title: "Sin interferencias evidentes",
+      detail: "Con las reglas sincronizadas no se detectaron bloqueos obvios para API, WireGuard o forward de tuneles."
+    });
+  }
+
+  return findings;
+}
+
+function buildFirewallPresetRule(router, preset, payload) {
+  const srcAddress = cleanText(payload.srcAddress);
+  const wireGuardPort = payload.wireGuardPort ? Number(payload.wireGuardPort) : null;
+  const commentSuffix = "VPN WG CONTROL";
+
+  if (preset === "allow-api") {
+    return {
+      chain: "input",
+      action: "accept",
+      protocol: "tcp",
+      dstPort: String(router.apiPort),
+      srcAddress,
+      comment: `Allow API ${commentSuffix}`
+    };
+  }
+
+  if (preset === "allow-wireguard") {
+    if (!Number.isInteger(wireGuardPort) || wireGuardPort < 1 || wireGuardPort > 65535) {
+      throw new Error("Ingresa un puerto UDP WireGuard valido.");
+    }
+
+    return {
+      chain: "input",
+      action: "accept",
+      protocol: "udp",
+      dstPort: String(wireGuardPort),
+      srcAddress,
+      comment: `Allow WireGuard UDP ${commentSuffix}`
+    };
+  }
+
+  if (preset === "allow-forward-established") {
+    return {
+      chain: "forward",
+      action: "accept",
+      connectionState: "established,related",
+      comment: `Allow established forward ${commentSuffix}`
+    };
+  }
+
+  throw new Error("Preset firewall no soportado.");
+}
+
+function isDropAction(action) {
+  return action === "drop" || action === "reject";
+}
+
+function hasAcceptBefore(rules, endIndex, matcher) {
+  return rules.slice(0, endIndex).some((rule) => {
+    if (rule.action !== "accept" || rule.chain !== matcher.chain) {
+      return false;
+    }
+
+    if (matcher.protocol && rule.protocol && rule.protocol !== matcher.protocol) {
+      return false;
+    }
+
+    if (matcher.dstPort && rule.dstPort && !portListIncludes(rule.dstPort, matcher.dstPort)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function hasForwardAcceptForAddress(rules, endIndex, allowedAddress) {
+  if (!allowedAddress) {
+    return false;
+  }
+
+  return rules.slice(0, endIndex).some((rule) => {
+    if (rule.chain !== "forward" || rule.action !== "accept") {
+      return false;
+    }
+
+    return rule.srcAddress === allowedAddress || rule.dstAddress === allowedAddress || (!rule.srcAddress && !rule.dstAddress);
+  });
+}
+
+function findWireGuardPortCandidates(rules) {
+  return rules.filter(
+    (rule) =>
+      rule.chain === "input" &&
+      rule.action === "accept" &&
+      rule.protocol === "udp" &&
+      rule.dstPort &&
+      /wireguard|wg/i.test(rule.comment || "")
+  );
+}
+
+function portListIncludes(portList, port) {
+  return String(portList)
+    .split(",")
+    .map((item) => item.trim())
+    .includes(String(port));
 }
 
 function validateWireGuardPeerPayload(payload) {

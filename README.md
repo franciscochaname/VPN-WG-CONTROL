@@ -87,3 +87,6 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se mantiene la regla de no crear peers locales si RouterOS no confirma la operacion.
 - Se mejoro el monitor de topologia con un lienzo tipo laboratorio de red: grilla, nodos, enlaces animados y barra de estado.
 - El monitor ahora consume routers y tuneles reales del snapshot local, sin crear conexiones de ejemplo.
+- Se agrego modulo Firewall para sincronizar reglas reales `filter` y `nat` desde RouterOS.
+- Se agrego diagnostico de interferencias que revisa posibles bloqueos en `input`, `forward` y ausencia de NAT para tuneles.
+- Se agregaron presets guiados para permitir API, WireGuard UDP y trafico forward establecido desde la app.

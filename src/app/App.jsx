@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Dashboard from "../features/dashboard/Dashboard.jsx";
+import FirewallCenter from "../features/firewall/FirewallCenter.jsx";
 import WireGuardKeys from "../features/keys/WireGuardKeys.jsx";
 import Header from "../features/layout/Header.jsx";
 import OperationsPanel from "../features/layout/OperationsPanel.jsx";
@@ -139,6 +140,10 @@ function ContentView({
 
   if (activeView === "security") {
     return <SecurityCenter />;
+  }
+
+  if (activeView === "firewall") {
+    return <FirewallCenter selectedRouter={selectedRouter} />;
   }
 
   if (activeView === "keys") {

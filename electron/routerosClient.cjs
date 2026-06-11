@@ -283,6 +283,47 @@ async function addWireGuardPeer(config, peer) {
   });
 }
 
+async function fetchFirewallState(config) {
+  return withRouterOsSession(config, async (client) => {
+    const filter = await client.command(["/ip/firewall/filter/print"]);
+    const nat = await client.command(["/ip/firewall/nat/print"]);
+
+    return {
+      filter: dataAttributes(filter),
+      nat: dataAttributes(nat)
+    };
+  });
+}
+
+async function addFirewallFilterRule(config, rule) {
+  return withRouterOsSession(config, async (client) => {
+    const words = [
+      "/ip/firewall/filter/add",
+      `=chain=${rule.chain}`,
+      `=action=${rule.action}`
+    ];
+
+    addOptionalWord(words, "protocol", rule.protocol);
+    addOptionalWord(words, "src-address", rule.srcAddress);
+    addOptionalWord(words, "dst-address", rule.dstAddress);
+    addOptionalWord(words, "dst-port", rule.dstPort);
+    addOptionalWord(words, "in-interface", rule.inInterface);
+    addOptionalWord(words, "out-interface", rule.outInterface);
+    addOptionalWord(words, "connection-state", rule.connectionState);
+    addOptionalWord(words, "comment", rule.comment);
+    addOptionalWord(words, "place-before", rule.placeBefore);
+
+    if (rule.disabled) {
+      words.push("=disabled=yes");
+    }
+
+    const response = await client.command(words);
+    return {
+      response: firstDoneAttributes(response)
+    };
+  });
+}
+
 function encodeLength(length) {
   if (length < 0x80) {
     return Buffer.from([length]);
@@ -362,6 +403,8 @@ function extractTrapMessage(sentences) {
 
 module.exports = {
   addWireGuardPeer,
+  addFirewallFilterRule,
+  fetchFirewallState,
   fetchWireGuardState,
   testRouterConnection
 };
