@@ -107,3 +107,4 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego inventario IPAM con tabla `tb_ip_segments` para segmentos reales y planificados.
 - Se agrego vista Segmentos para sincronizar IPs del router, clasificar LAN/WAN/VPN/troncales y registrar redes manuales.
 - Se rediseño la creacion WireGuard como asistente interactivo por tipo de conexion, con campos progresivos y opciones avanzadas plegadas.
+- Se agrego centro global de notificaciones, modales de confirmacion y refresco compartido para mantener coherencia entre VPN, firewall, segmentos y monitoreo.

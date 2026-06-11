@@ -9,6 +9,7 @@ import Sidebar from "../features/layout/Sidebar.jsx";
 import RouterRegistration from "../features/routers/RouterRegistration.jsx";
 import SecurityCenter from "../features/security/SecurityCenter.jsx";
 import WireGuardControl from "../features/wireguard/WireGuardControl.jsx";
+import NotificationCenter from "../shared/ui/NotificationCenter.jsx";
 import {
   diagnoseRouterServices,
   getDashboardSnapshot,
@@ -19,6 +20,7 @@ import {
 
 function App() {
   const [activeView, setActiveView] = useState("dashboard");
+  const [notifications, setNotifications] = useState([]);
   const [routers, setRouters] = useState([]);
   const [tunnels, setTunnels] = useState([]);
   const [metrics, setMetrics] = useState({
@@ -53,6 +55,18 @@ function App() {
     () => routers.find((router) => router.id === selectedRouterId) || routers[0] || null,
     [routers, selectedRouterId]
   );
+
+  const notify = useCallback(function notify(notification) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setNotifications((current) => [{ id, type: "info", ...notification }, ...current].slice(0, 4));
+    window.setTimeout(() => {
+      setNotifications((current) => current.filter((item) => item.id !== id));
+    }, notification.timeout || 5200);
+  }, []);
+
+  function dismissNotification(notificationId) {
+    setNotifications((current) => current.filter((item) => item.id !== notificationId));
+  }
 
   const refreshWorkspace = useCallback(async function refreshWorkspace(options = {}) {
     if (!options.silent) {
@@ -131,6 +145,7 @@ function App() {
   return (
     <main className="min-h-screen overflow-hidden bg-warm-canvas text-warm-ink">
       <div className="pointer-events-none fixed inset-0 soft-grid" />
+      <NotificationCenter notifications={notifications} onDismiss={dismissNotification} />
       <section className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-5 lg:px-8">
         <Header routerCount={metrics.routers} />
 
@@ -147,6 +162,8 @@ function App() {
             onOpenRouterRegistration={() => setActiveView("routers")}
             onRouterCreated={refreshWorkspace}
             onSyncWireGuard={handleSyncWireGuard}
+            onWorkspaceRefresh={refreshWorkspace}
+            onNotify={notify}
           />
           <OperationsPanel
             routers={routers}
@@ -174,14 +191,24 @@ function ContentView({
   selectedRouter,
   onOpenRouterRegistration,
   onRouterCreated,
-  onSyncWireGuard
+  onSyncWireGuard,
+  onWorkspaceRefresh,
+  onNotify
 }) {
   if (activeView === "routers") {
     return <RouterRegistration onRouterCreated={onRouterCreated} />;
   }
 
   if (activeView === "wireguard") {
-    return <WireGuardControl routers={routers} selectedRouter={selectedRouter} onSyncWireGuard={onSyncWireGuard} />;
+    return (
+      <WireGuardControl
+        routers={routers}
+        selectedRouter={selectedRouter}
+        onSyncWireGuard={onSyncWireGuard}
+        onWorkspaceRefresh={onWorkspaceRefresh}
+        onNotify={onNotify}
+      />
+    );
   }
 
   if (activeView === "security") {
@@ -189,7 +216,7 @@ function ContentView({
   }
 
   if (activeView === "firewall") {
-    return <FirewallCenter selectedRouter={selectedRouter} />;
+    return <FirewallCenter selectedRouter={selectedRouter} onNotify={onNotify} />;
   }
 
   if (activeView === "keys") {
@@ -197,7 +224,7 @@ function ContentView({
   }
 
   if (activeView === "ipam") {
-    return <IpamCenter selectedRouter={selectedRouter} />;
+    return <IpamCenter selectedRouter={selectedRouter} onWorkspaceRefresh={onWorkspaceRefresh} onNotify={onNotify} />;
   }
 
   return (

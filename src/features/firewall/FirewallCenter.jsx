@@ -1,6 +1,7 @@
 import { AlertTriangle, Flame, Gauge, ListFilter, RefreshCw, ShieldAlert, ShieldCheck, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { applyFirewallPreset, listFirewall, syncFirewall } from "../../shared/api/firewallStore.js";
+import ConfirmDialog from "../../shared/ui/ConfirmDialog.jsx";
 
 const initialPreset = {
   preset: "allow-api",
@@ -18,7 +19,7 @@ const presetLabels = {
 
 const chainFilters = ["todo", "input", "forward", "nat"];
 
-function FirewallCenter({ selectedRouter }) {
+function FirewallCenter({ selectedRouter, onNotify }) {
   const [rules, setRules] = useState([]);
   const [findings, setFindings] = useState([]);
   const [presetForm, setPresetForm] = useState(initialPreset);
@@ -26,6 +27,7 @@ function FirewallCenter({ selectedRouter }) {
   const [isLoading, setIsLoading] = useState(true);
   const [busyAction, setBusyAction] = useState(null);
   const [message, setMessage] = useState({ type: "idle", text: "" });
+  const [confirmPresetOpen, setConfirmPresetOpen] = useState(false);
 
   const selectedRouterId = selectedRouter?.id || null;
   const visibleRules = useMemo(() => rules.filter((rule) => rule.tableName === "filter"), [rules]);
@@ -68,8 +70,18 @@ function FirewallCenter({ selectedRouter }) {
       setRules(result.rules);
       setFindings(result.findings);
       setMessage({ type: "success", text: "Firewall sincronizado desde RouterOS." });
+      onNotify?.({
+        type: "success",
+        title: "Firewall sincronizado",
+        detail: "Reglas filter/NAT y hallazgos quedaron actualizados."
+      });
     } catch (error) {
       setMessage({ type: "error", text: error.message || "No se pudo sincronizar firewall." });
+      onNotify?.({
+        type: "error",
+        title: "Firewall no sincronizado",
+        detail: error.message || "No se pudo sincronizar firewall."
+      });
     } finally {
       setBusyAction(null);
     }
@@ -80,10 +92,24 @@ function FirewallCenter({ selectedRouter }) {
 
     if (!selectedRouter) {
       setMessage({ type: "error", text: "Selecciona o registra un router antes de aplicar reglas." });
+      onNotify?.({
+        type: "warning",
+        title: "Router requerido",
+        detail: "Selecciona un router antes de aplicar una regla."
+      });
+      return;
+    }
+
+    setConfirmPresetOpen(true);
+  }
+
+  async function executeApplyPreset() {
+    if (!selectedRouter) {
       return;
     }
 
     setBusyAction("preset");
+    setConfirmPresetOpen(false);
     setMessage({ type: "idle", text: "" });
 
     try {
@@ -94,8 +120,18 @@ function FirewallCenter({ selectedRouter }) {
       setRules(result.rules);
       setFindings(result.findings);
       setMessage({ type: "success", text: "Regla aplicada y firewall sincronizado." });
+      onNotify?.({
+        type: "success",
+        title: "Regla aplicada",
+        detail: `${presetLabels[presetForm.preset]} quedo sincronizada con el router.`
+      });
     } catch (error) {
       setMessage({ type: "error", text: error.message || "No se pudo aplicar la regla." });
+      onNotify?.({
+        type: "error",
+        title: "No se pudo aplicar firewall",
+        detail: error.message || "La regla no fue aplicada."
+      });
     } finally {
       setBusyAction(null);
     }
@@ -301,6 +337,16 @@ function FirewallCenter({ selectedRouter }) {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        confirmLabel="Aplicar regla"
+        detail={`${presetLabels[presetForm.preset]} se enviara al router ${selectedRouter?.alias || "seleccionado"} y luego se sincronizara el firewall.`}
+        isBusy={busyAction === "preset"}
+        isOpen={confirmPresetOpen}
+        onCancel={() => setConfirmPresetOpen(false)}
+        onConfirm={executeApplyPreset}
+        title="Confirmar cambio de firewall"
+      />
     </section>
   );
 }

@@ -13,6 +13,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { listWireGuardKeys } from "../../shared/api/wireGuardKeyStore.js";
 import { listWireGuardTunnels, orchestrateWireGuardVpn } from "../../shared/api/wireGuardStore.js";
+import ConfirmDialog from "../../shared/ui/ConfirmDialog.jsx";
 
 const initialPeerForm = {
   vpnType: "remote-access",
@@ -69,13 +70,14 @@ const vpnTypes = [
   }
 ];
 
-function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
+function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspaceRefresh, onNotify }) {
   const [tunnels, setTunnels] = useState([]);
   const [keys, setKeys] = useState([]);
   const [peerForm, setPeerForm] = useState(initialPeerForm);
   const [isLoading, setIsLoading] = useState(true);
   const [isPeerSaving, setIsPeerSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [confirmCreateOpen, setConfirmCreateOpen] = useState(false);
   const [actionState, setActionState] = useState({ type: "idle", message: "" });
   const [lastRunSteps, setLastRunSteps] = useState([]);
 
@@ -107,6 +109,11 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
   async function handleSync() {
     if (!selectedRouter) {
       setActionState({ type: "error", message: "Registra y selecciona un router antes de sincronizar WireGuard." });
+      onNotify?.({
+        type: "warning",
+        title: "Router requerido",
+        detail: "Registra o selecciona un router antes de sincronizar WireGuard."
+      });
       return;
     }
 
@@ -115,8 +122,18 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
       await onSyncWireGuard(selectedRouter.id);
       await refreshTunnels();
       setActionState({ type: "success", message: "Lectura WireGuard finalizada con datos reales del router." });
+      onNotify?.({
+        type: "success",
+        title: "WireGuard sincronizado",
+        detail: "La lectura real actualizo tuneles, trafico y monitoreo."
+      });
     } catch (error) {
       setActionState({ type: "error", message: error.message || "No se pudo sincronizar WireGuard." });
+      onNotify?.({
+        type: "error",
+        title: "Sincronizacion fallida",
+        detail: error.message || "No se pudo sincronizar WireGuard."
+      });
     }
   }
 
@@ -125,10 +142,24 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
 
     if (!selectedRouter) {
       setActionState({ type: "error", message: "Selecciona un router antes de crear la VPN." });
+      onNotify?.({
+        type: "warning",
+        title: "Router requerido",
+        detail: "Selecciona un router en el panel lateral para continuar."
+      });
+      return;
+    }
+
+    setConfirmCreateOpen(true);
+  }
+
+  async function executeCreatePeer() {
+    if (!selectedRouter) {
       return;
     }
 
     setIsPeerSaving(true);
+    setConfirmCreateOpen(false);
     setActionState({ type: "idle", message: "" });
 
     try {
@@ -140,9 +171,20 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
       setShowAdvanced(false);
       setLastRunSteps(result.steps || []);
       await refreshTunnels();
+      await onWorkspaceRefresh?.({ silent: true });
       setActionState({ type: "success", message: "VPN orquestada y verificada con lectura actualizada." });
+      onNotify?.({
+        type: "success",
+        title: "VPN creada",
+        detail: `${selectedType.label}: peer, reglas y verificacion quedaron integrados al monitoreo.`
+      });
     } catch (error) {
       setActionState({ type: "error", message: error.message || "No se pudo completar la orquestacion VPN." });
+      onNotify?.({
+        type: "error",
+        title: "Orquestacion detenida",
+        detail: error.message || "No se pudo completar la VPN."
+      });
     } finally {
       setIsPeerSaving(false);
     }
@@ -231,7 +273,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
                 <span>2</span>
                 <div>
                   <h4>Datos principales</h4>
-                  <p>{selectedType.fields.join(" · ")}</p>
+                  <p>{selectedType.fields.join(" - ")}</p>
                 </div>
               </div>
 
@@ -486,6 +528,16 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard }) {
           </div>
         </section>
       )}
+
+      <ConfirmDialog
+        confirmLabel="Crear VPN"
+        detail={`Se ejecutara la orquestacion ${selectedType.label} sobre ${selectedRouter?.alias || "el router seleccionado"}: ${selectedType.automation.join(", ")}.`}
+        isBusy={isPeerSaving}
+        isOpen={confirmCreateOpen}
+        onCancel={() => setConfirmCreateOpen(false)}
+        onConfirm={executeCreatePeer}
+        title="Revisar antes de aplicar"
+      />
 
       {isLoading ? (
         <div className="empty-panel">Cargando tuneles guardados.</div>

@@ -1359,3 +1359,191 @@ button {
   background: rgba(196, 233, 211, 0.14);
   color: #d6f4e1;
 }
+
+.notification-stack {
+  position: fixed;
+  right: 22px;
+  top: 20px;
+  z-index: 80;
+  display: grid;
+  width: min(380px, calc(100vw - 44px));
+  gap: 10px;
+}
+
+.toast {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 28px;
+  gap: 10px;
+  align-items: start;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: rgba(255, 253, 248, 0.98);
+  color: #73695f;
+  box-shadow: 0 18px 38px rgba(76, 54, 32, 0.16);
+  padding: 12px;
+  animation: toastIn 220ms ease-out;
+}
+
+.toast > svg {
+  margin-top: 2px;
+}
+
+.toast p {
+  color: #2a2520;
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.toast span {
+  display: block;
+  margin-top: 3px;
+  color: #73695f;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.toast button {
+  display: grid;
+  height: 26px;
+  width: 26px;
+  place-items: center;
+  border-radius: 8px;
+  color: #73695f;
+}
+
+.toast button:hover {
+  background: #f4ead9;
+  color: #2a2520;
+}
+
+.toast-success > svg {
+  color: #4d9078;
+}
+
+.toast-info > svg {
+  color: #3d7180;
+}
+
+.toast-warning > svg {
+  color: #e5a23a;
+}
+
+.toast-error > svg {
+  color: #c66a38;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(42, 37, 32, 0.24);
+  backdrop-filter: blur(5px);
+  padding: 24px;
+}
+
+.confirm-modal {
+  position: relative;
+  width: min(460px, 100%);
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  box-shadow: 0 24px 60px rgba(42, 37, 32, 0.22);
+  padding: 22px;
+  animation: modalIn 180ms ease-out;
+}
+
+.confirm-icon {
+  display: grid;
+  height: 44px;
+  width: 44px;
+  place-items: center;
+  border-radius: 8px;
+  background: #fff1d6;
+  color: #9b6220;
+}
+
+.confirm-icon-danger {
+  background: #fff1ed;
+  color: #a94727;
+}
+
+.confirm-close {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  display: grid;
+  height: 32px;
+  width: 32px;
+  place-items: center;
+  border-radius: 8px;
+  color: #73695f;
+}
+
+.confirm-close:hover {
+  background: #f4ead9;
+  color: #2a2520;
+}
+
+.confirm-modal h3 {
+  margin-top: 14px;
+  color: #2a2520;
+  font-size: 1.1rem;
+  font-weight: 850;
+}
+
+.confirm-modal p {
+  margin-top: 8px;
+  color: #73695f;
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.6;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.confirm-danger {
+  display: inline-flex;
+  min-height: 43px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #a94727;
+  color: #fffdf8;
+  font-size: 0.9rem;
+  font-weight: 850;
+  padding: 0 15px;
+}
+
+.confirm-danger:hover {
+  transform: translateY(-1px);
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

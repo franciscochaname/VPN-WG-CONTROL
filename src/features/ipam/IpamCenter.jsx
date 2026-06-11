@@ -1,6 +1,7 @@
 import { GitBranch, Network, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createIpSegment, listIpSegments, removeIpSegment, syncIpInventory } from "../../shared/api/ipamStore.js";
+import ConfirmDialog from "../../shared/ui/ConfirmDialog.jsx";
 
 const initialForm = {
   label: "",
@@ -20,12 +21,13 @@ const purposeLabels = {
   unknown: "Sin clasificar"
 };
 
-function IpamCenter({ selectedRouter }) {
+function IpamCenter({ selectedRouter, onWorkspaceRefresh, onNotify }) {
   const [segments, setSegments] = useState([]);
   const [form, setForm] = useState(initialForm);
   const [isLoading, setIsLoading] = useState(true);
   const [busyAction, setBusyAction] = useState(null);
   const [message, setMessage] = useState({ type: "idle", text: "" });
+  const [segmentToRemove, setSegmentToRemove] = useState(null);
   const selectedRouterId = selectedRouter?.id || null;
   const summary = useMemo(() => buildSummary(segments), [segments]);
 
@@ -54,8 +56,19 @@ function IpamCenter({ selectedRouter }) {
         type: "success",
         text: `Segmentos sincronizados. Interfaces: ${result.interfaces}, VLANs: ${result.vlans}, rutas: ${result.routes}.`
       });
+      await onWorkspaceRefresh?.({ silent: true });
+      onNotify?.({
+        type: "success",
+        title: "Segmentos sincronizados",
+        detail: `${result.segments?.length || 0} segmentos disponibles para planificar VPN.`
+      });
     } catch (error) {
       setMessage({ type: "error", text: error.message || "No se pudo sincronizar segmentacion." });
+      onNotify?.({
+        type: "error",
+        title: "IPAM no sincronizado",
+        detail: error.message || "No se pudo sincronizar segmentacion."
+      });
     } finally {
       setBusyAction(null);
     }
@@ -73,17 +86,40 @@ function IpamCenter({ selectedRouter }) {
       });
       setForm(initialForm);
       await refreshSegments();
+      await onWorkspaceRefresh?.({ silent: true });
       setMessage({ type: "success", text: "Segmento guardado en la planificacion local." });
+      onNotify?.({
+        type: "success",
+        title: "Segmento guardado",
+        detail: `${form.cidr} queda disponible para planificacion y VPN.`
+      });
     } catch (error) {
       setMessage({ type: "error", text: error.message || "No se pudo guardar el segmento." });
+      onNotify?.({
+        type: "error",
+        title: "Segmento no guardado",
+        detail: error.message || "No se pudo guardar el segmento."
+      });
     } finally {
       setBusyAction(null);
     }
   }
 
-  async function handleRemove(segmentId) {
-    await removeIpSegment(segmentId);
+  async function executeRemoveSegment() {
+    if (!segmentToRemove) {
+      return;
+    }
+
+    await removeIpSegment(segmentToRemove.id);
+    const removedSegment = segmentToRemove;
+    setSegmentToRemove(null);
     await refreshSegments();
+    await onWorkspaceRefresh?.({ silent: true });
+    onNotify?.({
+      type: "info",
+      title: "Segmento eliminado",
+      detail: `${removedSegment.cidr} fue retirado de la planificacion.`
+    });
   }
 
   function updateForm(field, value) {
@@ -185,17 +221,27 @@ function IpamCenter({ selectedRouter }) {
               </div>
               <div className="min-w-0">
                 <p>{segment.label}</p>
-                <span>{segment.cidr} · {segment.interfaceName || "sin interfaz"} · {segment.routerAlias || "global"}</span>
+                <span>{segment.cidr} - {segment.interfaceName || "sin interfaz"} - {segment.routerAlias || "global"}</span>
               </div>
               <span className={`segment-badge segment-badge-${segment.purpose}`}>{purposeLabels[segment.purpose] || segment.purpose}</span>
               <span className="segment-source">{segment.source === "routeros" ? "real" : "plan"}</span>
-              <button className="icon-text-button icon-text-danger" onClick={() => handleRemove(segment.id)} type="button">
+              <button className="icon-text-button icon-text-danger" onClick={() => setSegmentToRemove(segment)} type="button">
                 <Trash2 size={15} />
               </button>
             </article>
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        confirmLabel="Eliminar segmento"
+        detail={`${segmentToRemove?.cidr || ""} se quitara de la planificacion local. No se eliminara del router.`}
+        isOpen={Boolean(segmentToRemove)}
+        onCancel={() => setSegmentToRemove(null)}
+        onConfirm={executeRemoveSegment}
+        title="Eliminar segmento planificado"
+        tone="danger"
+      />
     </section>
   );
 }
