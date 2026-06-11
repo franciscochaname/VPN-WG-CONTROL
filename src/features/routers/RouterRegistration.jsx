@@ -184,7 +184,7 @@ function RouterRegistration({ onRouterCreated }) {
 
         {!isElectronPersistenceAvailable() && (
           <div className="rounded-lg border border-warm-line bg-[#fff9ef] p-3 text-sm text-warm-muted">
-            Vista web de desarrollo: los registros viven solo en memoria. En Electron se guardan en SQLite con secreto cifrado.
+            Modo temporal: los registros viven solo en memoria. La persistencia real guarda el secreto cifrado localmente.
           </div>
         )}
 

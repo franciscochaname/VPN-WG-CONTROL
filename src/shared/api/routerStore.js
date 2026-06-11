@@ -53,7 +53,7 @@ export async function testRouterConnection(routerId) {
     return electronApi().routers.testConnection(routerId);
   }
 
-  throw new Error("La prueba de conexion solo esta disponible dentro de Electron.");
+  throw new Error("La prueba de conexion solo esta disponible en la app instalada.");
 }
 
 export async function syncWireGuard(routerId) {
@@ -61,7 +61,7 @@ export async function syncWireGuard(routerId) {
     return electronApi().routers.syncWireGuard(routerId);
   }
 
-  throw new Error("La sincronizacion WireGuard solo esta disponible dentro de Electron.");
+  throw new Error("La sincronizacion WireGuard solo esta disponible en la app instalada.");
 }
 
 export async function diagnoseRouterServices(routerId) {
@@ -69,7 +69,7 @@ export async function diagnoseRouterServices(routerId) {
     return electronApi().routers.diagnoseServices(routerId);
   }
 
-  throw new Error("El diagnostico de servicios solo esta disponible dentro de Electron.");
+  throw new Error("El diagnostico de servicios solo esta disponible en la app instalada.");
 }
 
 export async function getDashboardSnapshot() {
@@ -93,8 +93,8 @@ export async function getDashboardSnapshot() {
       findings: [
         {
           severity: "info",
-          title: "Vista navegador",
-          detail: "El monitoreo real se activa en la app de escritorio con acceso a Electron y RouterOS."
+          title: "Modo temporal",
+          detail: "El monitoreo real se activa en la app instalada con acceso seguro al router."
         }
       ]
     },

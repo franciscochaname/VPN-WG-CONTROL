@@ -59,7 +59,7 @@ function WireGuardKeys({ routers }) {
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-warm-copper">Criptografo local</p>
           <h2 className="mt-1 text-xl font-semibold">Llaves WireGuard</h2>
           <p className="mt-1 text-sm text-warm-muted">
-            La clave privada se cifra en Electron y no se envia de vuelta al frontend.
+            La clave privada se cifra localmente y no se muestra de nuevo en pantalla.
           </p>
         </div>
         <button className="action-button" onClick={refreshKeys} type="button">

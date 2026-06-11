@@ -26,7 +26,7 @@ function SecurityCenter() {
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-warm-copper">Seguridad local</p>
           <h2 className="mt-1 text-xl font-semibold">Cifrado y arquitectura</h2>
           <p className="mt-1 text-sm text-warm-muted">
-            Verificacion ejecutada desde Electron sobre la base local y el puente IPC.
+            Verificacion ejecutada sobre la base local, el cifrado y el canal seguro de la app.
           </p>
         </div>
         <button className="action-button" disabled={isLoading} onClick={refreshHealth} type="button">
@@ -69,7 +69,7 @@ function SecurityCenter() {
           />
           <SecurityCard
             icon={ShieldCheck}
-            label="Aislamiento Electron"
+            label="Aislamiento de la app"
             status={health.contextIsolation && !health.nodeIntegration ? "Activo" : "Revisar"}
             detail="contextIsolation activo y nodeIntegration deshabilitado en el renderer."
             ok={health.contextIsolation && !health.nodeIntegration}

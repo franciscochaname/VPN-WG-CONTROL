@@ -16,7 +16,7 @@ export async function syncFirewall(routerId) {
     return electronApi().firewall.sync(routerId);
   }
 
-  throw new Error("La sincronizacion de firewall solo esta disponible dentro de Electron.");
+  throw new Error("La sincronizacion de firewall solo esta disponible en la app instalada.");
 }
 
 export async function applyFirewallPreset(payload) {
@@ -24,5 +24,5 @@ export async function applyFirewallPreset(payload) {
     return electronApi().firewall.applyPreset(payload);
   }
 
-  throw new Error("La aplicacion de reglas firewall solo esta disponible dentro de Electron.");
+  throw new Error("La aplicacion de reglas firewall solo esta disponible en la app instalada.");
 }

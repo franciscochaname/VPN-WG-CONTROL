@@ -8,8 +8,8 @@ export async function getSecurityHealth() {
   return {
     encryptionAvailable: false,
     canEncryptDecrypt: false,
-    encryptionError: "La verificacion de cifrado solo esta disponible dentro de Electron.",
-    databasePath: "Memoria del navegador",
+    encryptionError: "La verificacion de cifrado solo esta disponible en la app instalada.",
+    databasePath: "Memoria temporal",
     credentialCount: 0,
     encryptedCredentialCount: 0,
     secretsExposedToRenderer: false,

@@ -13,5 +13,5 @@ export async function addWireGuardPeer(payload) {
     return electronApi().wireguard.addPeer(payload);
   }
 
-  throw new Error("La creacion de peers WireGuard solo esta disponible dentro de Electron.");
+  throw new Error("La creacion de peers WireGuard solo esta disponible en la app instalada.");
 }

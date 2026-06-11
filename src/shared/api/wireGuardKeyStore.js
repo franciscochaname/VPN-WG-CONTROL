@@ -19,7 +19,7 @@ export async function generateWireGuardKey(payload) {
   const key = {
     id: crypto.randomUUID(),
     label: payload.label || `Llave WireGuard ${new Date().toLocaleString("es-PE")}`,
-    publicKey: "Disponible solo dentro de Electron",
+    publicKey: "Disponible en la app instalada",
     assignedRouterId: payload.assignedRouterId || null,
     assignedRouterAlias: null,
     assignedTunnelId: null,

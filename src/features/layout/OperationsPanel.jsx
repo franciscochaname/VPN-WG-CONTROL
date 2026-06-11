@@ -167,7 +167,7 @@ function OperationsPanel({
           </div>
         ) : (
           <p className="mt-3 text-sm leading-6 text-[#f5ead9]">
-            Sin credenciales guardadas. El secreto solo se almacena cifrado desde Electron.
+            Sin credenciales guardadas. El secreto solo se almacena cifrado localmente.
           </p>
         )}
         <button className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-warm-amber px-3 py-2.5 text-sm font-semibold text-warm-ink transition hover:bg-[#efb65a]" onClick={onOpenRouterRegistration} type="button">
