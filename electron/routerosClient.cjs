@@ -392,6 +392,23 @@ async function fetchIpInventory(config) {
   });
 }
 
+async function removeRouterOsItems(config, path, ids) {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return { removed: 0 };
+  }
+
+  return withRouterOsSession(config, async (client) => {
+    let removed = 0;
+
+    for (const id of ids) {
+      await client.command([`${path}/remove`, `=.id=${id}`]);
+      removed += 1;
+    }
+
+    return { removed };
+  });
+}
+
 function encodeLength(length) {
   if (length < 0x80) {
     return Buffer.from([length]);
@@ -477,5 +494,6 @@ module.exports = {
   fetchFirewallState,
   fetchIpInventory,
   fetchWireGuardState,
+  removeRouterOsItems,
   testRouterConnection
 };

@@ -1306,6 +1306,69 @@ button {
   color: #73695f !important;
 }
 
+.backup-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 96px 110px;
+  gap: 10px;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 10px;
+}
+
+.backup-icon {
+  display: grid;
+  height: 36px;
+  width: 36px;
+  place-items: center;
+  border-radius: 8px;
+  background: #f4ead9;
+  color: #c66a38;
+}
+
+.backup-row p {
+  overflow: hidden;
+  color: #2a2520;
+  font-size: 0.9rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backup-row span {
+  display: block;
+  overflow: hidden;
+  color: #73695f;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backup-status {
+  border-radius: 999px;
+  font-size: 0.74rem !important;
+  font-weight: 850 !important;
+  padding: 5px 8px;
+  text-align: center;
+}
+
+.backup-status-ready {
+  background: #edf5ef;
+  color: #3d7c66 !important;
+}
+
+.backup-status-rolled_back {
+  background: #f4ead9;
+  color: #9b6220 !important;
+}
+
+.backup-status-failed {
+  background: #fff1ed;
+  color: #a94727 !important;
+}
+
 .key-public {
   display: block;
   overflow-wrap: anywhere;

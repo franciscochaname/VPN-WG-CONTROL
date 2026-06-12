@@ -40,5 +40,10 @@ contextBridge.exposeInMainWorld("vpnWgControl", {
     sync: (routerId) => ipcRenderer.invoke("ipam:sync", routerId),
     create: (payload) => ipcRenderer.invoke("ipam:create", payload),
     remove: (segmentId) => ipcRenderer.invoke("ipam:remove", segmentId)
+  },
+  backups: {
+    list: (routerId) => ipcRenderer.invoke("backups:list", routerId),
+    create: (payload) => ipcRenderer.invoke("backups:create", payload),
+    rollback: (backupId) => ipcRenderer.invoke("backups:rollback", backupId)
   }
 });

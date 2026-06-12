@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import BackupCenter from "../features/backups/BackupCenter.jsx";
 import Dashboard from "../features/dashboard/Dashboard.jsx";
 import FirewallCenter from "../features/firewall/FirewallCenter.jsx";
 import IpamCenter from "../features/ipam/IpamCenter.jsx";
@@ -225,6 +226,10 @@ function ContentView({
 
   if (activeView === "ipam") {
     return <IpamCenter selectedRouter={selectedRouter} onWorkspaceRefresh={onWorkspaceRefresh} onNotify={onNotify} />;
+  }
+
+  if (activeView === "backups") {
+    return <BackupCenter selectedRouter={selectedRouter} onWorkspaceRefresh={onWorkspaceRefresh} onNotify={onNotify} />;
   }
 
   return (

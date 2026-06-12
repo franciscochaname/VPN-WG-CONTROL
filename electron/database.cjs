@@ -11,6 +11,7 @@ const {
   fetchFirewallState,
   fetchIpInventory,
   fetchWireGuardState,
+  removeRouterOsItems,
   testRouterConnection
 } = require("./routerosClient.cjs");
 const { getEventServerStatus } = require("./eventServer.cjs");
@@ -162,12 +163,28 @@ function initializeDatabase(userDataPath) {
     CREATE TABLE IF NOT EXISTS tb_orchestration_runs (
       id TEXT PRIMARY KEY,
       router_id TEXT NOT NULL,
+      backup_id TEXT,
       vpn_type TEXT NOT NULL,
       label TEXT NOT NULL,
       status TEXT NOT NULL,
       steps_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       completed_at TEXT,
+      FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS tb_router_backups (
+      id TEXT PRIMARY KEY,
+      router_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      operation_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ready',
+      firewall_json TEXT NOT NULL,
+      wireguard_json TEXT NOT NULL,
+      ip_inventory_json TEXT NOT NULL,
+      rollback_summary_json TEXT,
+      created_at TEXT NOT NULL,
+      rolled_back_at TEXT,
       FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
     );
 
@@ -180,6 +197,7 @@ function initializeDatabase(userDataPath) {
     CREATE INDEX IF NOT EXISTS idx_telemetry_samples_tunnel_id ON tb_telemetry_samples(tunnel_id);
     CREATE INDEX IF NOT EXISTS idx_ip_segments_router_id ON tb_ip_segments(router_id);
     CREATE INDEX IF NOT EXISTS idx_orchestration_runs_router_id ON tb_orchestration_runs(router_id);
+    CREATE INDEX IF NOT EXISTS idx_router_backups_router_id ON tb_router_backups(router_id);
   `);
   runMigrations();
 }
@@ -208,6 +226,9 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("ipam:sync", (_event, routerId) => syncIpInventory(routerId));
   ipcMain.handle("ipam:create", (_event, payload) => createIpSegment(payload));
   ipcMain.handle("ipam:remove", (_event, segmentId) => removeIpSegment(segmentId));
+  ipcMain.handle("backups:list", (_event, routerId) => listRouterBackups(routerId));
+  ipcMain.handle("backups:create", (_event, payload) => createManualRouterBackup(payload));
+  ipcMain.handle("backups:rollback", (_event, backupId) => rollbackRouterBackup(backupId));
 }
 
 function listRouters() {
@@ -787,11 +808,16 @@ async function orchestrateWireGuardVpn(payload = {}) {
   const steps = [];
   const runId = randomUUID();
   const now = new Date().toISOString();
+  const backup = await createRouterBackup(
+    plan.routerId,
+    `Antes de crear VPN ${plan.label}`,
+    "wireguard-orchestration"
+  );
 
   db.prepare(`
-    INSERT INTO tb_orchestration_runs (id, router_id, vpn_type, label, status, steps_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(runId, plan.routerId, plan.vpnType, plan.label, "running", JSON.stringify(steps), now);
+    INSERT INTO tb_orchestration_runs (id, router_id, backup_id, vpn_type, label, status, steps_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(runId, plan.routerId, backup.id, plan.vpnType, plan.label, "running", JSON.stringify(steps), now);
 
   try {
     await runOrchestrationStep(steps, "peer", "Crear peer WireGuard", () =>
@@ -840,6 +866,7 @@ async function orchestrateWireGuardVpn(payload = {}) {
 
     return {
       runId,
+      backupId: backup.id,
       status: "completed",
       steps,
       snapshot: getDashboardSnapshot(),
@@ -1061,6 +1088,7 @@ async function applyFirewallPreset(payload = {}) {
   const preset = cleanText(payload.preset);
   const router = getRouterWithSecret(routerId);
   const rule = buildFirewallPresetRule(router, preset, payload);
+  await createRouterBackup(routerId, `Antes de aplicar firewall: ${rule.comment}`, "firewall-preset");
 
   try {
     await addFirewallFilterRule(toConnectionConfig(router), rule);
@@ -2080,6 +2108,205 @@ function classifySegment(interfaceName = "", comment = "") {
   return "unknown";
 }
 
+async function createManualRouterBackup(payload = {}) {
+  assertDatabase();
+  const routerId = cleanText(payload.routerId);
+  const reason = cleanText(payload.reason) || "Respaldo manual";
+
+  return createRouterBackup(routerId, reason, "manual");
+}
+
+async function createRouterBackup(routerId, reason, operationKey) {
+  assertDatabase();
+  const router = getRouterWithSecret(routerId);
+  const connectionConfig = toConnectionConfig(router);
+  const firewall = await fetchFirewallState(connectionConfig);
+  const wireguard = await fetchWireGuardState(connectionConfig);
+  const ipInventory = await fetchIpInventory(connectionConfig);
+  const id = randomUUID();
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO tb_router_backups (
+      id,
+      router_id,
+      reason,
+      operation_key,
+      status,
+      firewall_json,
+      wireguard_json,
+      ip_inventory_json,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    routerId,
+    reason,
+    operationKey,
+    "ready",
+    JSON.stringify(firewall),
+    JSON.stringify(wireguard),
+    JSON.stringify(ipInventory),
+    now
+  );
+
+  insertLog(routerId, "router-backup", "info", `Respaldo creado: ${reason}.`);
+
+  return listRouterBackups(routerId).find((backup) => backup.id === id);
+}
+
+function listRouterBackups(routerId) {
+  assertDatabase();
+  const params = [];
+  let where = "";
+
+  if (routerId) {
+    where = "WHERE b.router_id = ?";
+    params.push(routerId);
+  }
+
+  return db
+    .prepare(`
+      SELECT
+        b.id,
+        b.router_id AS routerId,
+        r.alias AS routerAlias,
+        r.host AS routerHost,
+        b.reason,
+        b.operation_key AS operationKey,
+        b.status,
+        b.rollback_summary_json AS rollbackSummaryJson,
+        b.created_at AS createdAt,
+        b.rolled_back_at AS rolledBackAt
+      FROM tb_router_backups b
+      INNER JOIN tb_config_router r ON r.id = b.router_id
+      ${where}
+      ORDER BY b.created_at DESC
+      LIMIT 80
+    `)
+    .all(...params)
+    .map((backup) => ({
+      ...backup,
+      rollbackSummary: parseJsonSafe(backup.rollbackSummaryJson)
+    }));
+}
+
+async function rollbackRouterBackup(backupId) {
+  assertDatabase();
+
+  if (!backupId || typeof backupId !== "string") {
+    throw new Error("Respaldo invalido.");
+  }
+
+  const backup = db
+    .prepare(`
+      SELECT
+        id,
+        router_id AS routerId,
+        reason,
+        status,
+        firewall_json AS firewallJson,
+        wireguard_json AS wireguardJson,
+        ip_inventory_json AS ipInventoryJson
+      FROM tb_router_backups
+      WHERE id = ?
+    `)
+    .get(backupId);
+
+  if (!backup) {
+    throw new Error("Respaldo no encontrado.");
+  }
+
+  if (backup.status === "rolled_back") {
+    throw new Error("Este respaldo ya fue usado para rollback.");
+  }
+
+  const router = getRouterWithSecret(backup.routerId);
+  const config = toConnectionConfig(router);
+  const beforeFirewall = parseJsonSafe(backup.firewallJson) || { filter: [], nat: [] };
+  const beforeWireGuard = parseJsonSafe(backup.wireguardJson) || { peers: [] };
+  const beforeIp = parseJsonSafe(backup.ipInventoryJson) || { routes: [] };
+  const [currentFirewall, currentWireGuard, currentIp] = await Promise.all([
+    fetchFirewallState(config),
+    fetchWireGuardState(config),
+    fetchIpInventory(config)
+  ]);
+  const summary = {
+    firewallFilterRemoved: 0,
+    firewallNatRemoved: 0,
+    wireGuardPeersRemoved: 0,
+    routesRemoved: 0
+  };
+
+  const filterIds = findRollbackCandidateIds(currentFirewall.filter, beforeFirewall.filter);
+  const natIds = findRollbackCandidateIds(currentFirewall.nat, beforeFirewall.nat);
+  const peerIds = findRollbackCandidateIds(currentWireGuard.peers, beforeWireGuard.peers);
+  const routeIds = findRollbackCandidateIds(currentIp.routes, beforeIp.routes);
+
+  try {
+    summary.firewallFilterRemoved = (await removeRouterOsItems(config, "/ip/firewall/filter", filterIds)).removed;
+    summary.firewallNatRemoved = (await removeRouterOsItems(config, "/ip/firewall/nat", natIds)).removed;
+    summary.wireGuardPeersRemoved = (await removeRouterOsItems(config, "/interface/wireguard/peers", peerIds)).removed;
+    summary.routesRemoved = (await removeRouterOsItems(config, "/ip/route", routeIds)).removed;
+
+    db.prepare(`
+      UPDATE tb_router_backups
+      SET status = 'rolled_back',
+          rollback_summary_json = ?,
+          rolled_back_at = ?
+      WHERE id = ?
+    `).run(JSON.stringify(summary), new Date().toISOString(), backupId);
+
+    const now = new Date().toISOString();
+    const nextFirewall = await fetchFirewallState(config);
+    replaceFirewallRules(backup.routerId, "filter", nextFirewall.filter, now);
+    replaceFirewallRules(backup.routerId, "nat", nextFirewall.nat, now);
+    replaceWireGuardTunnels(backup.routerId, await fetchWireGuardState(config), now);
+
+    insertLog(backup.routerId, "router-rollback", "warning", `Rollback ejecutado desde respaldo: ${backup.reason}.`);
+
+    return {
+      backup: listRouterBackups(backup.routerId).find((item) => item.id === backupId),
+      summary,
+      firewall: listFirewall(backup.routerId),
+      snapshot: getDashboardSnapshot()
+    };
+  } catch (error) {
+    db.prepare(`
+      UPDATE tb_router_backups
+      SET status = 'failed',
+          rollback_summary_json = ?
+      WHERE id = ?
+    `).run(JSON.stringify({ ...summary, error: error.message }), backupId);
+    throw error;
+  }
+}
+
+function findRollbackCandidateIds(currentRows = [], backupRows = []) {
+  const existingIds = new Set(backupRows.map((row) => row[".id"]).filter(Boolean));
+
+  return currentRows
+    .filter((row) => row[".id"] && !existingIds.has(row[".id"]) && isAppOwnedRouterOsRow(row))
+    .map((row) => row[".id"]);
+}
+
+function isAppOwnedRouterOsRow(row = {}) {
+  return /VPN WG CONTROL/i.test(row.comment || "");
+}
+
+function parseJsonSafe(value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 function runMigrations() {
   ensureColumn("tb_config_router", "webfig_port", "INTEGER NOT NULL DEFAULT 8443");
   ensureColumn("tb_config_router", "webfig_tls", "INTEGER NOT NULL DEFAULT 1");
@@ -2088,6 +2315,7 @@ function runMigrations() {
   ensureColumn("tb_config_router", "router_version", "TEXT");
   ensureColumn("tb_config_router", "last_sync_at", "TEXT");
   ensureColumn("tb_firewall_rules", "connection_state", "TEXT");
+  ensureColumn("tb_orchestration_runs", "backup_id", "TEXT");
 }
 
 function getLatestDiagnostics(routerId) {

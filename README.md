@@ -108,3 +108,10 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego vista Segmentos para sincronizar IPs del router, clasificar LAN/WAN/VPN/troncales y registrar redes manuales.
 - Se rediseño la creacion WireGuard como asistente interactivo por tipo de conexion, con campos progresivos y opciones avanzadas plegadas.
 - Se agrego centro global de notificaciones, modales de confirmacion y refresco compartido para mantener coherencia entre VPN, firewall, segmentos y monitoreo.
+
+### 2026-06-12
+
+- Se agrego tabla `tb_router_backups` para snapshots previos de WireGuard, firewall, NAT e inventario IP/rutas.
+- Se agrego respaldo automatico antes de orquestar VPN y antes de aplicar presets de firewall.
+- Se agrego rollback selectivo para retirar objetos nuevos creados por la app despues de un respaldo.
+- Se agrego vista `Respaldos` para crear snapshots manuales, revisar historial y ejecutar rollback con confirmacion.
