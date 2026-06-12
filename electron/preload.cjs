@@ -39,7 +39,11 @@ contextBridge.exposeInMainWorld("vpnWgControl", {
     list: (routerId) => ipcRenderer.invoke("ipam:list", routerId),
     sync: (routerId) => ipcRenderer.invoke("ipam:sync", routerId),
     create: (payload) => ipcRenderer.invoke("ipam:create", payload),
-    remove: (segmentId) => ipcRenderer.invoke("ipam:remove", segmentId)
+    remove: (segmentId) => ipcRenderer.invoke("ipam:remove", segmentId),
+    analysis: (routerId) => ipcRenderer.invoke("ipam:analysis", routerId),
+    suggest: (payload) => ipcRenderer.invoke("ipam:suggest", payload),
+    reserve: (payload) => ipcRenderer.invoke("ipam:reserve", payload),
+    release: (reservationId) => ipcRenderer.invoke("ipam:release", reservationId)
   },
   backups: {
     list: (routerId) => ipcRenderer.invoke("backups:list", routerId),

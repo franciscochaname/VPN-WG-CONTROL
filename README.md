@@ -115,3 +115,7 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego respaldo automatico antes de orquestar VPN y antes de aplicar presets de firewall.
 - Se agrego rollback selectivo para retirar objetos nuevos creados por la app despues de un respaldo.
 - Se agrego vista `Respaldos` para crear snapshots manuales, revisar historial y ejecutar rollback con confirmacion.
+- Se agrego IPAM inteligente con tabla `tb_ip_reservations` para reservas persistentes por segmento.
+- Se agrego analisis local de capacidad IP, redes superpuestas, IPs duplicadas, rutas WireGuard y proxima IP disponible.
+- Se agrego reserva guiada de IP con sugerencia automatica y bloqueo contra IPs ya usadas por inventario real o WireGuard.
+- Se rediseno la vista `Segmentos` con motor IPAM, tarjetas de salud, barras de utilizacion y detalle de reservas/rutas sin datos inventados.

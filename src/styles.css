@@ -8,7 +8,7 @@
 
 body {
   margin: 0;
-  min-width: 1080px;
+  min-width: 0;
   background: #fbf7ef;
 }
 
@@ -1231,6 +1231,162 @@ button {
   line-height: 1;
 }
 
+.segment-summary-ok {
+  background: #edf5ef;
+}
+
+.segment-summary-warn {
+  background: #fff1d6;
+}
+
+.segment-summary-danger {
+  background: #fff1ed;
+}
+
+.ipam-tool-panel,
+.ipam-brain-panel {
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 14px;
+}
+
+.ipam-brain-panel {
+  background:
+    linear-gradient(135deg, rgba(229, 162, 58, 0.14), transparent 42%),
+    #fffdf8;
+}
+
+.ipam-score {
+  display: grid;
+  height: 50px;
+  min-width: 62px;
+  place-items: center;
+  border-radius: 8px;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.ipam-score-ok {
+  background: #edf5ef;
+  color: #3d7c66;
+}
+
+.ipam-score-warn {
+  background: #fff1d6;
+  color: #9b6220;
+}
+
+.ipam-score-error {
+  background: #fff1ed;
+  color: #a94727;
+}
+
+.ipam-utilization-track,
+.segment-progress {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f4ead9;
+}
+
+.ipam-utilization-track span,
+.segment-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4d9078, #e5a23a, #c66a38);
+  transition: width 260ms ease;
+}
+
+.ipam-finding {
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  padding: 10px 11px;
+}
+
+.ipam-finding p {
+  color: #2a2520;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.ipam-finding span {
+  display: block;
+  margin-top: 3px;
+  color: #73695f;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.ipam-finding-ok {
+  background: #edf5ef;
+}
+
+.ipam-finding-info {
+  background: #fffdf8;
+}
+
+.ipam-finding-warning,
+.ipam-finding-warn {
+  background: #fff1d6;
+}
+
+.ipam-finding-error {
+  background: #fff1ed;
+}
+
+.ipam-help-text {
+  align-self: center;
+  color: #73695f;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.ipam-mini-empty {
+  display: grid;
+  min-height: 136px;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px dashed #eadfce;
+  background: #fffdf8;
+  color: #73695f;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.5;
+  padding: 18px;
+  text-align: center;
+}
+
+.reservation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 42px;
+  gap: 10px;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  padding: 10px;
+}
+
+.reservation-row p {
+  color: #2a2520;
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.reservation-row span {
+  display: block;
+  overflow: hidden;
+  color: #73695f;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .segment-row {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) 100px 68px 42px;
@@ -1240,6 +1396,14 @@ button {
   border: 1px solid #eadfce;
   background: #fff9ef;
   padding: 10px;
+}
+
+.segment-row-smart {
+  grid-template-columns: 38px minmax(150px, 1fr) 66px 86px 58px 92px 38px;
+}
+
+.segment-row-smart .icon-text-button {
+  padding: 0;
 }
 
 .segment-icon {
@@ -1269,6 +1433,64 @@ button {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.segment-row-smart > .min-w-0 > span {
+  margin-bottom: 8px;
+}
+
+.segment-capacity,
+.segment-next {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.segment-capacity strong,
+.segment-next strong {
+  overflow: hidden;
+  color: #2a2520;
+  font-size: 0.88rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segment-capacity span,
+.segment-next span {
+  color: #73695f;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.segment-detail-grid {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.ipam-chip {
+  border-radius: 999px;
+  font-size: 0.72rem !important;
+  font-weight: 850 !important;
+  padding: 5px 8px;
+}
+
+.ipam-chip-routeros {
+  background: #e9f1f4;
+  color: #3d7180 !important;
+}
+
+.ipam-chip-wireguard {
+  background: #f4ead9;
+  color: #c66a38 !important;
+}
+
+.ipam-chip-reservation {
+  background: #edf5ef;
+  color: #3d7c66 !important;
 }
 
 .segment-badge,
@@ -1608,5 +1830,29 @@ button {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 1180px) {
+  .segment-row-smart {
+    grid-template-columns: 38px minmax(0, 1fr) 42px;
+  }
+
+  .segment-row-smart .segment-capacity,
+  .segment-row-smart .segment-badge,
+  .segment-row-smart .segment-source,
+  .segment-row-smart .segment-next {
+    grid-column: 2 / -1;
+  }
+
+  .segment-row-smart .segment-capacity,
+  .segment-row-smart .segment-next {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .segment-detail-grid {
+    grid-column: 2 / -1;
   }
 }

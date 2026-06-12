@@ -160,6 +160,22 @@ function initializeDatabase(userDataPath) {
       FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS tb_ip_reservations (
+      id TEXT PRIMARY KEY,
+      segment_id TEXT NOT NULL,
+      router_id TEXT,
+      ip_address TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'reserved',
+      assignment_type TEXT NOT NULL DEFAULT 'manual',
+      related_tunnel_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (segment_id) REFERENCES tb_ip_segments(id) ON DELETE CASCADE,
+      FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE,
+      FOREIGN KEY (related_tunnel_id) REFERENCES tb_tuneles(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS tb_orchestration_runs (
       id TEXT PRIMARY KEY,
       router_id TEXT NOT NULL,
@@ -196,6 +212,8 @@ function initializeDatabase(userDataPath) {
     CREATE INDEX IF NOT EXISTS idx_telemetry_samples_router_id ON tb_telemetry_samples(router_id);
     CREATE INDEX IF NOT EXISTS idx_telemetry_samples_tunnel_id ON tb_telemetry_samples(tunnel_id);
     CREATE INDEX IF NOT EXISTS idx_ip_segments_router_id ON tb_ip_segments(router_id);
+    CREATE INDEX IF NOT EXISTS idx_ip_reservations_segment_id ON tb_ip_reservations(segment_id);
+    CREATE INDEX IF NOT EXISTS idx_ip_reservations_router_id ON tb_ip_reservations(router_id);
     CREATE INDEX IF NOT EXISTS idx_orchestration_runs_router_id ON tb_orchestration_runs(router_id);
     CREATE INDEX IF NOT EXISTS idx_router_backups_router_id ON tb_router_backups(router_id);
   `);
@@ -226,6 +244,10 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("ipam:sync", (_event, routerId) => syncIpInventory(routerId));
   ipcMain.handle("ipam:create", (_event, payload) => createIpSegment(payload));
   ipcMain.handle("ipam:remove", (_event, segmentId) => removeIpSegment(segmentId));
+  ipcMain.handle("ipam:analysis", (_event, routerId) => buildIpamAnalysis(routerId));
+  ipcMain.handle("ipam:suggest", (_event, payload) => suggestIpAddress(payload));
+  ipcMain.handle("ipam:reserve", (_event, payload) => createIpReservation(payload));
+  ipcMain.handle("ipam:release", (_event, reservationId) => removeIpReservation(reservationId));
   ipcMain.handle("backups:list", (_event, routerId) => listRouterBackups(routerId));
   ipcMain.handle("backups:create", (_event, payload) => createManualRouterBackup(payload));
   ipcMain.handle("backups:rollback", (_event, backupId) => rollbackRouterBackup(backupId));
@@ -2023,6 +2045,7 @@ function createIpSegment(payload = {}) {
   if (!cidr || !cidr.includes("/")) {
     throw new Error("Ingresa un segmento CIDR valido.");
   }
+  parseCidr(cidr);
 
   const id = randomUUID();
   db.prepare(`
@@ -2070,6 +2093,484 @@ function removeIpSegment(segmentId) {
 
   db.prepare("DELETE FROM tb_ip_segments WHERE id = ?").run(segmentId);
   return { ok: true };
+}
+
+function buildIpamAnalysis(routerId) {
+  assertDatabase();
+  const normalizedRouterId = cleanText(routerId) || null;
+  const segments = listIpSegments(normalizedRouterId);
+  const reservations = listIpReservations(normalizedRouterId);
+  const tunnels = listWireGuardTunnels(normalizedRouterId);
+  const findings = [];
+  const overlaps = [];
+  const conflicts = [];
+  const models = segments.map((segment) => createSegmentModel(segment, reservations, tunnels));
+
+  for (let index = 0; index < models.length; index += 1) {
+    const current = models[index];
+
+    if (!current.range) {
+      findings.push({
+        severity: "error",
+        title: "Segmento CIDR invalido",
+        detail: `${current.label} (${current.cidr}) no puede analizarse como IPv4 CIDR.`
+      });
+      continue;
+    }
+
+    for (let nextIndex = index + 1; nextIndex < models.length; nextIndex += 1) {
+      const next = models[nextIndex];
+
+      if (next.range && rangesOverlap(current.range, next.range)) {
+        overlaps.push({
+          severity: current.networkCidr === next.networkCidr ? "error" : "warning",
+          segmentA: summarizeSegmentForFinding(current),
+          segmentB: summarizeSegmentForFinding(next),
+          detail: current.networkCidr === next.networkCidr
+            ? "Red duplicada: ambas entradas representan el mismo bloque."
+            : "Los rangos se cruzan y pueden provocar asignaciones ambiguas."
+        });
+      }
+    }
+
+    const duplicateIps = findDuplicateIps(current.usedIps);
+    for (const duplicate of duplicateIps) {
+      conflicts.push({
+        severity: "error",
+        segment: summarizeSegmentForFinding(current),
+        ipAddress: duplicate.ipAddress,
+        detail: `${duplicate.ipAddress} aparece ${duplicate.count} veces en ${current.label}.`,
+        entries: duplicate.entries
+      });
+    }
+
+    if (current.utilization >= 85) {
+      findings.push({
+        severity: "warning",
+        title: "Segmento cerca del limite",
+        detail: `${current.label} usa ${current.utilization}% del bloque utilizable. Conviene reservar otro rango antes de crear mas VPN.`
+      });
+    }
+  }
+
+  if (segments.length === 0) {
+    findings.push({
+      severity: "info",
+      title: "Sin segmentos IPAM",
+      detail: "Sincroniza un router o registra redes planificadas para habilitar sugerencias y deteccion de conflictos."
+    });
+  }
+
+  if (overlaps.length > 0) {
+    findings.push({
+      severity: overlaps.some((item) => item.severity === "error") ? "error" : "warning",
+      title: "Solapes de red detectados",
+      detail: `${overlaps.length} relacion(es) de segmentos comparten espacio de direcciones.`
+    });
+  }
+
+  if (conflicts.length > 0) {
+    findings.push({
+      severity: "error",
+      title: "IPs duplicadas",
+      detail: `${conflicts.length} direccion(es) aparecen como usadas o reservadas mas de una vez.`
+    });
+  }
+
+  const usableIps = models.reduce((total, segment) => total + segment.usableIps, 0);
+  const usedIps = models.reduce((total, segment) => total + segment.usedCount, 0);
+  const reservedIps = models.reduce((total, segment) => total + segment.reservedCount, 0);
+
+  return {
+    routerId: normalizedRouterId,
+    generatedAt: new Date().toISOString(),
+    summary: {
+      totalSegments: segments.length,
+      totalReservations: reservations.length,
+      totalTunnels: tunnels.length,
+      usableIps,
+      usedIps,
+      reservedIps,
+      freeEstimate: Math.max(0, usableIps - usedIps),
+      utilization: usableIps > 0 ? Math.min(100, Math.round((usedIps / usableIps) * 100)) : 0,
+      overlaps: overlaps.length,
+      conflicts: conflicts.length
+    },
+    segments: models.map(({ range, usedSet, ...segment }) => segment),
+    reservations,
+    overlaps,
+    conflicts,
+    findings
+  };
+}
+
+function createSegmentModel(segment, reservations, tunnels) {
+  const range = safeParseCidr(segment.cidr);
+  const segmentReservations = reservations.filter((reservation) => reservation.segmentId === segment.id);
+  const usedIps = [];
+  const routedBlocks = [];
+
+  if (range && segment.gateway && ipInRange(segment.gateway, range)) {
+    usedIps.push({
+      ipAddress: normalizeIp(segment.gateway),
+      source: "routeros",
+      label: "Gateway del segmento",
+      detail: segment.interfaceName || segment.label
+    });
+  }
+
+  for (const tunnel of tunnels) {
+    for (const allowed of parseAllowedAddressBlocks(tunnel.allowedAddress)) {
+      if (!range || !rangesOverlap(range, allowed)) {
+        continue;
+      }
+
+      if (allowed.prefix === 32) {
+        usedIps.push({
+          ipAddress: intToIp(allowed.ip),
+          source: "wireguard",
+          label: tunnel.interfaceName,
+          detail: tunnel.allowedAddress,
+          tunnelId: tunnel.id
+        });
+      } else {
+        routedBlocks.push({
+          cidr: `${intToIp(allowed.network)}/${allowed.prefix}`,
+          source: "wireguard",
+          label: tunnel.interfaceName,
+          detail: tunnel.allowedAddress,
+          tunnelId: tunnel.id
+        });
+      }
+    }
+  }
+
+  for (const reservation of segmentReservations) {
+    usedIps.push({
+      ipAddress: normalizeIp(reservation.ipAddress),
+      source: "reservation",
+      label: reservation.label,
+      detail: reservation.assignmentType,
+      reservationId: reservation.id,
+      status: reservation.status
+    });
+  }
+
+  const usedSet = new Set(usedIps.map((entry) => entry.ipAddress).filter(Boolean));
+  const usableIps = range ? calculateUsableIps(range) : 0;
+  const usedCount = usedSet.size;
+  const nextAvailableIp = range ? findNextAvailableIp(range, usedSet) : null;
+
+  return {
+    ...segment,
+    range,
+    networkCidr: range ? `${intToIp(range.network)}/${range.prefix}` : null,
+    totalIps: range ? range.total : 0,
+    usableIps,
+    usedCount,
+    reservedCount: segmentReservations.length,
+    freeEstimate: Math.max(0, usableIps - usedCount),
+    utilization: usableIps > 0 ? Math.min(100, Math.round((usedCount / usableIps) * 100)) : 0,
+    nextAvailableIp,
+    usedIps: usedIps.sort((a, b) => ipToInt(a.ipAddress) - ipToInt(b.ipAddress)),
+    routedBlocks,
+    usedSet
+  };
+}
+
+function listIpReservations(routerId) {
+  assertDatabase();
+  const params = [];
+  let where = "";
+
+  if (routerId) {
+    where = "WHERE r.router_id = ?";
+    params.push(routerId);
+  }
+
+  return db
+    .prepare(`
+      SELECT
+        r.id,
+        r.segment_id AS segmentId,
+        r.router_id AS routerId,
+        cr.alias AS routerAlias,
+        r.ip_address AS ipAddress,
+        r.label,
+        r.status,
+        r.assignment_type AS assignmentType,
+        r.related_tunnel_id AS relatedTunnelId,
+        s.label AS segmentLabel,
+        s.cidr AS segmentCidr,
+        r.created_at AS createdAt,
+        r.updated_at AS updatedAt
+      FROM tb_ip_reservations r
+      INNER JOIN tb_ip_segments s ON s.id = r.segment_id
+      LEFT JOIN tb_config_router cr ON cr.id = r.router_id
+      ${where}
+      ORDER BY r.ip_address, r.created_at DESC
+    `)
+    .all(...params);
+}
+
+function suggestIpAddress(payload = {}) {
+  assertDatabase();
+  const segmentId = cleanText(payload.segmentId);
+
+  if (!segmentId) {
+    throw new Error("Selecciona un segmento para sugerir IP.");
+  }
+
+  const segment = findIpSegmentById(segmentId);
+
+  if (!segment) {
+    throw new Error("Segmento IPAM no encontrado.");
+  }
+
+  const analysis = buildIpamAnalysis(segment.routerId);
+  const analyzedSegment = analysis.segments.find((item) => item.id === segmentId);
+
+  if (!analyzedSegment?.nextAvailableIp) {
+    throw new Error("No hay IP disponible en el segmento seleccionado.");
+  }
+
+  return {
+    segmentId,
+    ipAddress: analyzedSegment.nextAvailableIp,
+    segment: analyzedSegment
+  };
+}
+
+function createIpReservation(payload = {}) {
+  assertDatabase();
+  const segmentId = cleanText(payload.segmentId);
+  const ipAddress = normalizeIp(payload.ipAddress);
+  const label = cleanText(payload.label) || ipAddress;
+  const assignmentType = cleanText(payload.assignmentType) || "manual";
+  const status = cleanText(payload.status) || "reserved";
+  const segment = findIpSegmentById(segmentId);
+
+  if (!segment) {
+    throw new Error("Segmento IPAM no encontrado.");
+  }
+
+  const range = parseCidr(segment.cidr);
+
+  if (!ipAddress || !ipInRange(ipAddress, range)) {
+    throw new Error("La IP no pertenece al segmento seleccionado.");
+  }
+
+  const existing = db
+    .prepare("SELECT id FROM tb_ip_reservations WHERE segment_id = ? AND ip_address = ?")
+    .get(segmentId, ipAddress);
+
+  if (existing) {
+    throw new Error("La IP ya esta reservada en este segmento.");
+  }
+
+  const analyzedSegment = buildIpamAnalysis(segment.routerId).segments.find((item) => item.id === segmentId);
+  const isAlreadyUsed = analyzedSegment?.usedIps?.some((entry) => entry.ipAddress === ipAddress && entry.source !== "reservation");
+
+  if (isAlreadyUsed) {
+    throw new Error("La IP ya aparece usada por inventario real o WireGuard.");
+  }
+
+  const id = randomUUID();
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO tb_ip_reservations (
+      id,
+      segment_id,
+      router_id,
+      ip_address,
+      label,
+      status,
+      assignment_type,
+      related_tunnel_id,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    segmentId,
+    segment.routerId || null,
+    ipAddress,
+    label,
+    status,
+    assignmentType,
+    cleanText(payload.relatedTunnelId) || null,
+    now,
+    now
+  );
+
+  insertLog(segment.routerId || null, "ipam-reservation", "info", `IP reservada: ${ipAddress} (${label}).`);
+  return listIpReservations(segment.routerId).find((reservation) => reservation.id === id);
+}
+
+function removeIpReservation(reservationId) {
+  assertDatabase();
+
+  if (!reservationId || typeof reservationId !== "string") {
+    throw new Error("Reserva invalida.");
+  }
+
+  db.prepare("DELETE FROM tb_ip_reservations WHERE id = ?").run(reservationId);
+  return { ok: true };
+}
+
+function findIpSegmentById(segmentId) {
+  return listIpSegments().find((segment) => segment.id === segmentId) || null;
+}
+
+function summarizeSegmentForFinding(segment) {
+  return {
+    id: segment.id,
+    label: segment.label,
+    cidr: segment.cidr,
+    networkCidr: segment.networkCidr,
+    routerAlias: segment.routerAlias || "global",
+    purpose: segment.purpose
+  };
+}
+
+function findDuplicateIps(entries = []) {
+  const groups = new Map();
+
+  for (const entry of entries) {
+    if (!entry.ipAddress) {
+      continue;
+    }
+
+    const group = groups.get(entry.ipAddress) || [];
+    group.push(entry);
+    groups.set(entry.ipAddress, group);
+  }
+
+  return Array.from(groups.entries())
+    .filter(([, group]) => group.length > 1)
+    .map(([ipAddress, group]) => ({
+      ipAddress,
+      count: group.length,
+      entries: group
+    }));
+}
+
+function parseAllowedAddressBlocks(allowedAddress) {
+  return String(allowedAddress || "")
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => safeParseCidr(item.includes("/") ? item : `${item}/32`))
+    .filter(Boolean);
+}
+
+function safeParseCidr(cidr) {
+  try {
+    return parseCidr(cidr);
+  } catch {
+    return null;
+  }
+}
+
+function parseCidr(cidr) {
+  const [ipPart, prefixPart] = String(cidr || "").trim().split("/");
+  const prefix = Number(prefixPart);
+
+  if (!ipPart || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+    throw new Error("Ingresa un segmento CIDR valido.");
+  }
+
+  const ip = ipToInt(ipPart);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const network = (ip & mask) >>> 0;
+  const broadcast = (network | (~mask >>> 0)) >>> 0;
+
+  return {
+    ip,
+    prefix,
+    mask,
+    network,
+    broadcast,
+    total: broadcast - network + 1
+  };
+}
+
+function normalizeIp(value) {
+  if (!value) {
+    return "";
+  }
+
+  return intToIp(ipToInt(String(value).split("/")[0]));
+}
+
+function ipToInt(value) {
+  const parts = String(value || "").trim().split(".");
+
+  if (parts.length !== 4) {
+    throw new Error("Ingresa una direccion IPv4 valida.");
+  }
+
+  return parts.reduce((total, part) => {
+    if (!/^\d+$/.test(part)) {
+      throw new Error("Ingresa una direccion IPv4 valida.");
+    }
+
+    const number = Number(part);
+
+    if (!Number.isInteger(number) || number < 0 || number > 255) {
+      throw new Error("Ingresa una direccion IPv4 valida.");
+    }
+
+    return ((total << 8) + number) >>> 0;
+  }, 0);
+}
+
+function intToIp(value) {
+  const number = Number(value) >>> 0;
+  return [
+    (number >>> 24) & 255,
+    (number >>> 16) & 255,
+    (number >>> 8) & 255,
+    number & 255
+  ].join(".");
+}
+
+function ipInRange(ipAddress, range) {
+  const ip = ipToInt(ipAddress);
+  return ip >= range.network && ip <= range.broadcast;
+}
+
+function rangesOverlap(first, second) {
+  return first.network <= second.broadcast && second.network <= first.broadcast;
+}
+
+function calculateUsableIps(range) {
+  if (range.prefix >= 31) {
+    return range.total;
+  }
+
+  return Math.max(0, range.total - 2);
+}
+
+function findNextAvailableIp(range, usedSet) {
+  const start = range.prefix >= 31 ? range.network : range.network + 1;
+  const end = range.prefix >= 31 ? range.broadcast : range.broadcast - 1;
+  const maxScan = 100000;
+  let scanned = 0;
+
+  for (let current = start; current <= end && scanned < maxScan; current += 1) {
+    const ip = intToIp(current);
+
+    if (!usedSet.has(ip)) {
+      return ip;
+    }
+
+    scanned += 1;
+  }
+
+  return null;
 }
 
 function findRouterByRemoteAddress(remoteAddress) {
