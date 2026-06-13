@@ -106,7 +106,7 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - La creacion guiada de VPN ahora aplica peer, firewall, rutas, NAT opcional y verificacion final por pasos.
 - Se agrego inventario IPAM con tabla `tb_ip_segments` para segmentos reales y planificados.
 - Se agrego vista Segmentos para sincronizar IPs del router, clasificar LAN/WAN/VPN/troncales y registrar redes manuales.
-- Se rediseño la creacion WireGuard como asistente interactivo por tipo de conexion, con campos progresivos y opciones avanzadas plegadas.
+- Se rediseno la creacion WireGuard como asistente interactivo por tipo de conexion, con campos progresivos y opciones avanzadas plegadas.
 - Se agrego centro global de notificaciones, modales de confirmacion y refresco compartido para mantener coherencia entre VPN, firewall, segmentos y monitoreo.
 
 ### 2026-06-12
@@ -123,3 +123,6 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego estado visible del monitor continuo en el dashboard con ultima pasada, resumen y ejecucion manual de ciclo.
 - Se rediseno el registro de router como asistente por pasos con validacion en vivo y guia RouterOS para API, WebFig, firewall y syslog.
 - Se agregaron validaciones frontales al asistente WireGuard para CIDR, llave publica, puertos y rutas antes de orquestar VPN.
+- Se compacto la arquitectura visual a dos columnas: barra izquierda operativa y centro ampliado para dashboard, VPN, firewall e IPAM.
+- Se agrego barra superior de flujo seguro para crear VPN y recordar backup, inyeccion controlada, verificacion y monitoreo sin duplicar metricas.
+- Se elimino la columna lateral derecha redundante y se movieron las acciones de crear VPN, extraer estado, validar servicios, firewall e IPAM a la barra izquierda.

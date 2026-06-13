@@ -5,8 +5,8 @@ import FirewallCenter from "../features/firewall/FirewallCenter.jsx";
 import IpamCenter from "../features/ipam/IpamCenter.jsx";
 import WireGuardKeys from "../features/keys/WireGuardKeys.jsx";
 import Header from "../features/layout/Header.jsx";
-import OperationsPanel from "../features/layout/OperationsPanel.jsx";
 import Sidebar from "../features/layout/Sidebar.jsx";
+import TopCommandBar from "../features/layout/TopCommandBar.jsx";
 import RouterRegistration from "../features/routers/RouterRegistration.jsx";
 import SecurityCenter from "../features/security/SecurityCenter.jsx";
 import WireGuardControl from "../features/wireguard/WireGuardControl.jsx";
@@ -14,9 +14,7 @@ import NotificationCenter from "../shared/ui/NotificationCenter.jsx";
 import {
   diagnoseRouterServices,
   getDashboardSnapshot,
-  removeRouter,
   syncWireGuard,
-  testRouterConnection
 } from "../shared/api/routerStore.js";
 
 function App() {
@@ -133,17 +131,6 @@ function App() {
     }
   }, []);
 
-  async function handleRemoveRouter(routerId) {
-    await removeRouter(routerId);
-    await refreshWorkspace();
-  }
-
-  async function handleTestRouter(routerId) {
-    const router = await testRouterConnection(routerId);
-    await refreshWorkspace();
-    return router;
-  }
-
   async function handleSyncWireGuard(routerId) {
     const snapshot = await syncWireGuard(routerId);
     setRouters(snapshot.routers);
@@ -179,8 +166,26 @@ function App() {
       <section className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-5 lg:px-8">
         <Header routerCount={metrics.routers} />
 
-        <div className="grid flex-1 grid-cols-1 gap-5 py-5 lg:grid-cols-[260px_minmax(0,1fr)_310px]">
-          <Sidebar activeView={activeView} onNavigate={setActiveView} />
+        <TopCommandBar
+          continuousMonitor={continuousMonitor}
+          selectedRouter={selectedRouter}
+          onNavigate={setActiveView}
+        />
+
+        <div className="grid flex-1 grid-cols-1 gap-5 py-5 lg:grid-cols-[300px_minmax(0,1fr)]">
+          <Sidebar
+            activeView={activeView}
+            routers={routers}
+            selectedRouter={selectedRouter}
+            onDiagnoseRouter={handleDiagnoseRouter}
+            onNavigate={setActiveView}
+            onOpenFirewall={() => setActiveView("firewall")}
+            onOpenIpam={() => setActiveView("ipam")}
+            onOpenRouterRegistration={() => setActiveView("routers")}
+            onOpenWireGuard={() => setActiveView("wireguard")}
+            onSelectRouter={setSelectedRouterId}
+            onSyncWireGuard={handleSyncWireGuard}
+          />
           <ContentView
             activeView={activeView}
             isLoading={isLoading}
@@ -195,16 +200,6 @@ function App() {
             onSyncWireGuard={handleSyncWireGuard}
             onWorkspaceRefresh={refreshWorkspace}
             onNotify={notify}
-          />
-          <OperationsPanel
-            routers={routers}
-            selectedRouter={selectedRouter}
-            onSelectRouter={setSelectedRouterId}
-            onRemoveRouter={handleRemoveRouter}
-            onTestRouter={handleTestRouter}
-            onSyncWireGuard={handleSyncWireGuard}
-            onDiagnoseRouter={handleDiagnoseRouter}
-            onOpenRouterRegistration={() => setActiveView("routers")}
           />
         </div>
       </section>
