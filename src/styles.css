@@ -609,6 +609,68 @@ button {
   transition: width 260ms ease;
 }
 
+.learning-tile {
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 10px 11px;
+}
+
+.learning-tile span {
+  display: block;
+  color: #73695f;
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.learning-tile strong {
+  display: block;
+  margin-top: 4px;
+  color: #2a2520;
+  font-size: 1.05rem;
+  font-weight: 850;
+}
+
+.learned-profile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  padding: 9px 11px;
+}
+
+.learned-profile strong,
+.learned-profile span,
+.learned-profile small {
+  display: block;
+}
+
+.learned-profile strong {
+  overflow: hidden;
+  color: #2a2520;
+  font-size: 0.82rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.learned-profile span {
+  margin-top: 2px;
+  color: #73695f;
+  font-size: 0.73rem;
+  font-weight: 650;
+}
+
+.learned-profile small {
+  flex: 0 0 auto;
+  color: #3d7c66;
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
 .insight-row {
   border-radius: 8px;
   border: 1px solid #eadfce;
@@ -772,6 +834,39 @@ button {
 .field-input:focus {
   border-color: #e5a23a;
   box-shadow: 0 0 0 3px rgba(229, 162, 58, 0.18);
+}
+
+.field-with-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.mini-action-button {
+  display: inline-flex;
+  min-height: 43px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #f4ead9;
+  color: #2a2520;
+  font-size: 0.78rem;
+  font-weight: 850;
+  padding: 0 11px;
+  transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.mini-action-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #e5a23a;
+  background: #fff1d6;
+}
+
+.mini-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .field-error {
@@ -1457,6 +1552,7 @@ button {
 
 .preview-card,
 .automation-box,
+.preflight-box,
 .readiness-list {
   border-radius: 8px;
   border: 1px solid #eadfce;
@@ -1519,6 +1615,58 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+.preflight-box {
+  display: grid;
+  gap: 8px;
+}
+
+.preflight-box p {
+  color: #73695f;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.preflight-item {
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 9px 10px;
+}
+
+.preflight-item strong,
+.preflight-item span {
+  display: block;
+}
+
+.preflight-item strong {
+  color: #2a2520;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.preflight-item span {
+  margin-top: 3px;
+  color: #73695f;
+  font-size: 0.73rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.preflight-item-ok {
+  border-color: #d3e5d9;
+  background: #edf5ef;
+}
+
+.preflight-item-warning {
+  border-color: #efd7a1;
+  background: #fff1d6;
+}
+
+.preflight-item-error {
+  border-color: #efc5b5;
+  background: #fff1ed;
 }
 
 .automation-box p {

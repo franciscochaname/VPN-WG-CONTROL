@@ -126,3 +126,9 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se compacto la arquitectura visual a dos columnas: barra izquierda operativa y centro ampliado para dashboard, VPN, firewall e IPAM.
 - Se agrego barra superior de flujo seguro para crear VPN y recordar backup, inyeccion controlada, verificacion y monitoreo sin duplicar metricas.
 - Se elimino la columna lateral derecha redundante y se movieron las acciones de crear VPN, extraer estado, validar servicios, firewall e IPAM a la barra izquierda.
+- Se agrego tabla `tb_monitoring_profiles` para que el motor inteligente aprenda perfiles locales persistentes por tunel WireGuard.
+- Se agrego aprendizaje incremental con promedio movil RX/TX, pico local, ciclos en silencio y ultimo handshake a partir de muestras reales.
+- Se amplio el dashboard con resumen de perfiles aprendidos, perfiles entrenados, silencio detectado y picos locales sin servicios externos.
+- Se mejoro el asistente WireGuard por escenarios claros: laptop a router, router a router, sucursal con NAT y troncal de red.
+- Se conecto la creacion de VPN con IPAM y firewall para validar segmento, sugerir IP libre, bloquear duplicados y detectar solapes antes de orquestar.
+- Se agrego panel de analisis previo para revisar router, segmento, peer, ruta remota, conflictos IPAM y firewall antes de aplicar comandos.

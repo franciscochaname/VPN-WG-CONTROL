@@ -158,6 +158,26 @@ function initializeDatabase(userDataPath) {
       FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS tb_monitoring_profiles (
+      id TEXT PRIMARY KEY,
+      router_id TEXT NOT NULL,
+      tunnel_id TEXT,
+      scope TEXT NOT NULL DEFAULT 'tunnel',
+      label TEXT NOT NULL,
+      sample_count INTEGER NOT NULL DEFAULT 0,
+      avg_bytes_per_sec REAL NOT NULL DEFAULT 0,
+      avg_rx_bytes_per_sec REAL NOT NULL DEFAULT 0,
+      avg_tx_bytes_per_sec REAL NOT NULL DEFAULT 0,
+      peak_bytes_per_sec REAL NOT NULL DEFAULT 0,
+      quiet_cycles INTEGER NOT NULL DEFAULT 0,
+      last_status TEXT,
+      last_handshake_at TEXT,
+      last_learned_at TEXT NOT NULL,
+      profile_json TEXT NOT NULL,
+      FOREIGN KEY (router_id) REFERENCES tb_config_router(id) ON DELETE CASCADE,
+      FOREIGN KEY (tunnel_id) REFERENCES tb_tuneles(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS tb_ip_segments (
       id TEXT PRIMARY KEY,
       router_id TEXT,
@@ -226,6 +246,8 @@ function initializeDatabase(userDataPath) {
     CREATE INDEX IF NOT EXISTS idx_firewall_rules_router_id ON tb_firewall_rules(router_id);
     CREATE INDEX IF NOT EXISTS idx_telemetry_samples_router_id ON tb_telemetry_samples(router_id);
     CREATE INDEX IF NOT EXISTS idx_telemetry_samples_tunnel_id ON tb_telemetry_samples(tunnel_id);
+    CREATE INDEX IF NOT EXISTS idx_monitoring_profiles_router_id ON tb_monitoring_profiles(router_id);
+    CREATE INDEX IF NOT EXISTS idx_monitoring_profiles_tunnel_id ON tb_monitoring_profiles(tunnel_id);
     CREATE INDEX IF NOT EXISTS idx_ip_segments_router_id ON tb_ip_segments(router_id);
     CREATE INDEX IF NOT EXISTS idx_ip_reservations_segment_id ON tb_ip_reservations(segment_id);
     CREATE INDEX IF NOT EXISTS idx_ip_reservations_router_id ON tb_ip_reservations(router_id);
@@ -625,6 +647,7 @@ function getDashboardSnapshot() {
 }
 
 function buildMonitoringSnapshot(routers, tunnels) {
+  const profiles = listMonitoringProfiles();
   const samples = db
     .prepare(`
       SELECT
@@ -654,9 +677,11 @@ function buildMonitoringSnapshot(routers, tunnels) {
   const totalTxBytes = tunnels.reduce((total, tunnel) => total + Number(tunnel.txBytes || 0), 0);
   const throughputBps = calculateThroughput(samples);
   const anomalyFindings = detectTelemetryAnomalies(samples, tunnels);
+  const profileFindings = detectProfileFindings(profiles, tunnels);
   const firewallWarnings = routers.flatMap((router) =>
     listFirewall(router.id).findings.filter((finding) => finding.severity === "warning" || finding.severity === "error")
   );
+  const learningSummary = buildLearningSummary(profiles);
 
   if (routers.length === 0) {
     findings.push({
@@ -706,7 +731,7 @@ function buildMonitoringSnapshot(routers, tunnels) {
     });
   }
 
-  findings.push(...anomalyFindings);
+  findings.push(...profileFindings, ...anomalyFindings);
 
   if (findings.length === 0 && tunnels.length > 0) {
     findings.push({
@@ -721,8 +746,10 @@ function buildMonitoringSnapshot(routers, tunnels) {
     eventServer: getEventServerStatus(),
     latestSampleAt: sampleStats.latestSampleAt || null,
     sampleCount: Number(sampleStats.total || 0),
-    confidence: calculateMonitoringConfidence(Number(sampleStats.total || 0), tunnels.length),
-    mode: Number(sampleStats.total || 0) >= Math.max(8, tunnels.length * 4) ? "baseline" : "training",
+    confidence: calculateMonitoringConfidence(Number(sampleStats.total || 0), tunnels.length, learningSummary.trainedProfiles),
+    mode: learningSummary.trainedProfiles >= Math.max(1, tunnels.length) ? "baseline" : "training",
+    learningSummary,
+    profiles: profiles.slice(0, 6),
     totalRxBytes,
     totalTxBytes,
     throughputBps,
@@ -811,6 +838,124 @@ function detectTelemetryAnomalies(samples, tunnels) {
   return findings;
 }
 
+function listMonitoringProfiles(routerId = null) {
+  assertDatabase();
+  const params = [];
+  let where = "";
+
+  if (routerId) {
+    where = "WHERE p.router_id = ?";
+    params.push(routerId);
+  }
+
+  return db
+    .prepare(`
+      SELECT
+        p.id,
+        p.router_id AS routerId,
+        r.alias AS routerAlias,
+        p.tunnel_id AS tunnelId,
+        p.scope,
+        p.label,
+        p.sample_count AS sampleCount,
+        p.avg_bytes_per_sec AS avgBytesPerSec,
+        p.avg_rx_bytes_per_sec AS avgRxBytesPerSec,
+        p.avg_tx_bytes_per_sec AS avgTxBytesPerSec,
+        p.peak_bytes_per_sec AS peakBytesPerSec,
+        p.quiet_cycles AS quietCycles,
+        p.last_status AS lastStatus,
+        p.last_handshake_at AS lastHandshakeAt,
+        p.last_learned_at AS lastLearnedAt,
+        p.profile_json AS profileJson
+      FROM tb_monitoring_profiles p
+      LEFT JOIN tb_config_router r ON r.id = p.router_id
+      ${where}
+      ORDER BY p.last_learned_at DESC
+    `)
+    .all(...params)
+    .map((profile) => ({
+      ...profile,
+      sampleCount: Number(profile.sampleCount || 0),
+      avgBytesPerSec: Math.round(Number(profile.avgBytesPerSec || 0)),
+      avgRxBytesPerSec: Math.round(Number(profile.avgRxBytesPerSec || 0)),
+      avgTxBytesPerSec: Math.round(Number(profile.avgTxBytesPerSec || 0)),
+      peakBytesPerSec: Math.round(Number(profile.peakBytesPerSec || 0)),
+      quietCycles: Number(profile.quietCycles || 0),
+      profile: parseJsonSafe(profile.profileJson) || {}
+    }));
+}
+
+function buildLearningSummary(profiles) {
+  const trainedProfiles = profiles.filter((profile) => profile.sampleCount >= 6).length;
+  const activeProfiles = profiles.filter((profile) => profile.avgBytesPerSec > 0 && profile.quietCycles === 0).length;
+  const quietProfiles = profiles.filter((profile) => profile.quietCycles >= 2).length;
+  const averageBps = profiles.reduce((total, profile) => total + profile.avgBytesPerSec, 0);
+  const peakBps = profiles.reduce((peak, profile) => Math.max(peak, profile.peakBytesPerSec), 0);
+
+  return {
+    profileCount: profiles.length,
+    trainedProfiles,
+    activeProfiles,
+    quietProfiles,
+    averageBps: Math.round(averageBps),
+    peakBps: Math.round(peakBps)
+  };
+}
+
+function detectProfileFindings(profiles, tunnels) {
+  const findings = [];
+  const tunnelById = new Map(tunnels.map((tunnel) => [tunnel.id, tunnel]));
+  let trainingProfiles = 0;
+
+  for (const profile of profiles) {
+    const tunnel = tunnelById.get(profile.tunnelId);
+    const label = profile.label || tunnel?.allowedAddress || tunnel?.interfaceName || "Tunel WireGuard";
+
+    if (profile.sampleCount > 0 && profile.sampleCount < 6) {
+      trainingProfiles += 1;
+      continue;
+    }
+
+    if (profile.sampleCount < 6) {
+      continue;
+    }
+
+    if (profile.quietCycles >= 3 && profile.avgBytesPerSec > 512) {
+      findings.push({
+        severity: "warning",
+        title: "Patron aprendido en silencio",
+        detail: `${label} tuvo trafico habitual y acumula ${profile.quietCycles} ciclo(s) con actividad muy baja.`
+      });
+    }
+
+    if (profile.avgBytesPerSec > 0 && profile.peakBytesPerSec > profile.avgBytesPerSec * 5 && profile.peakBytesPerSec > 50000) {
+      findings.push({
+        severity: "info",
+        title: "Perfil con picos fuertes",
+        detail: `${label} registra picos superiores a 5x su promedio local. Conviene revisar si es backup, descarga o trafico inesperado.`
+      });
+    }
+
+    if (profile.lastHandshakeAt && tunnel && !tunnel.lastHandshakeAt) {
+      findings.push({
+        severity: "warning",
+        title: "Handshake perdido contra historial",
+        detail: `${label} tuvo handshake aprendido, pero la lectura actual no reporta handshake activo.`
+      });
+    }
+  }
+
+  if (trainingProfiles > 0) {
+    findings.push({
+      severity: "training",
+      title: "Perfiles locales aprendiendo",
+      detail: `${trainingProfiles} perfil(es) aun estan reuniendo muestras para activar deteccion por patron.`
+    });
+  }
+
+  return findings.slice(0, 6);
+}
+
 function groupSamplesByTunnel(samples) {
   const grouped = new Map();
 
@@ -850,12 +995,15 @@ function minutesSince(isoDate) {
   return (Date.now() - timestamp) / 60000;
 }
 
-function calculateMonitoringConfidence(sampleCount, tunnelCount) {
+function calculateMonitoringConfidence(sampleCount, tunnelCount, trainedProfiles = 0) {
   if (tunnelCount === 0) {
     return sampleCount > 0 ? 20 : 0;
   }
 
-  return Math.min(95, Math.round((sampleCount / Math.max(8, tunnelCount * 6)) * 100));
+  const sampleScore = Math.min(70, Math.round((sampleCount / Math.max(8, tunnelCount * 6)) * 70));
+  const profileScore = Math.min(25, Math.round((trainedProfiles / Math.max(1, tunnelCount)) * 25));
+
+  return Math.min(95, sampleScore + profileScore);
 }
 
 function getSecurityHealth() {
@@ -1861,6 +2009,174 @@ function insertTelemetrySamples(routerId, rows, sampledAt) {
       sampledAt
     );
   }
+
+  learnTelemetryProfiles(routerId, rows, sampledAt);
+}
+
+function learnTelemetryProfiles(routerId, rows, sampledAt) {
+  const previousStatement = db.prepare(`
+    SELECT
+      rx_bytes AS rxBytes,
+      tx_bytes AS txBytes,
+      sampled_at AS sampledAt
+    FROM tb_telemetry_samples
+    WHERE tunnel_id = ? AND sampled_at < ?
+    ORDER BY sampled_at DESC
+    LIMIT 1
+  `);
+  const profileStatement = db.prepare(`
+    SELECT
+      id,
+      sample_count AS sampleCount,
+      avg_bytes_per_sec AS avgBytesPerSec,
+      avg_rx_bytes_per_sec AS avgRxBytesPerSec,
+      avg_tx_bytes_per_sec AS avgTxBytesPerSec,
+      peak_bytes_per_sec AS peakBytesPerSec,
+      quiet_cycles AS quietCycles,
+      profile_json AS profileJson
+    FROM tb_monitoring_profiles
+    WHERE tunnel_id = ?
+  `);
+  const insertStatement = db.prepare(`
+    INSERT INTO tb_monitoring_profiles (
+      id,
+      router_id,
+      tunnel_id,
+      scope,
+      label,
+      sample_count,
+      avg_bytes_per_sec,
+      avg_rx_bytes_per_sec,
+      avg_tx_bytes_per_sec,
+      peak_bytes_per_sec,
+      quiet_cycles,
+      last_status,
+      last_handshake_at,
+      last_learned_at,
+      profile_json
+    )
+    VALUES (?, ?, ?, 'tunnel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const updateStatement = db.prepare(`
+    UPDATE tb_monitoring_profiles
+    SET label = ?,
+        sample_count = ?,
+        avg_bytes_per_sec = ?,
+        avg_rx_bytes_per_sec = ?,
+        avg_tx_bytes_per_sec = ?,
+        peak_bytes_per_sec = ?,
+        quiet_cycles = ?,
+        last_status = ?,
+        last_handshake_at = ?,
+        last_learned_at = ?,
+        profile_json = ?
+    WHERE id = ?
+  `);
+
+  for (const row of rows) {
+    const previous = previousStatement.get(row.id, sampledAt);
+    const existing = profileStatement.get(row.id);
+    const existingProfile = parseJsonSafe(existing?.profileJson) || {};
+    const sampleCount = Number(existing?.sampleCount || 0) + 1;
+    const learned = buildLearnedProfileValues(existing, previous, row, sampledAt, sampleCount);
+    const label = row.allowedAddress || row.interfaceName || "WireGuard peer";
+    const profileJson = JSON.stringify({
+      ...existingProfile,
+      lastRxBytes: Number(row.rxBytes || 0),
+      lastTxBytes: Number(row.txBytes || 0),
+      lastBytesPerSec: learned.hasRate ? learned.bytesPerSec : existingProfile.lastBytesPerSec || 0,
+      lastRxBytesPerSec: learned.hasRate ? learned.rxBytesPerSec : existingProfile.lastRxBytesPerSec || 0,
+      lastTxBytesPerSec: learned.hasRate ? learned.txBytesPerSec : existingProfile.lastTxBytesPerSec || 0,
+      lastDeltaSeconds: learned.seconds,
+      lastDeltaValid: learned.hasRate,
+      learningAlpha: 0.25
+    });
+
+    if (existing) {
+      updateStatement.run(
+        label,
+        sampleCount,
+        learned.avgBytesPerSec,
+        learned.avgRxBytesPerSec,
+        learned.avgTxBytesPerSec,
+        learned.peakBytesPerSec,
+        learned.quietCycles,
+        row.status,
+        row.lastHandshakeAt,
+        sampledAt,
+        profileJson,
+        existing.id
+      );
+      continue;
+    }
+
+    insertStatement.run(
+      randomUUID(),
+      routerId,
+      row.id,
+      label,
+      sampleCount,
+      learned.avgBytesPerSec,
+      learned.avgRxBytesPerSec,
+      learned.avgTxBytesPerSec,
+      learned.peakBytesPerSec,
+      learned.quietCycles,
+      row.status,
+      row.lastHandshakeAt,
+      sampledAt,
+      profileJson
+    );
+  }
+}
+
+function buildLearnedProfileValues(existing, previous, row, sampledAt, sampleCount) {
+  const currentRxBytes = Number(row.rxBytes || 0);
+  const currentTxBytes = Number(row.txBytes || 0);
+  const previousRxBytes = Number(previous?.rxBytes || 0);
+  const previousTxBytes = Number(previous?.txBytes || 0);
+  const seconds = previous ? secondsBetween(sampledAt, previous.sampledAt) : 0;
+  const rxDelta = currentRxBytes - previousRxBytes;
+  const txDelta = currentTxBytes - previousTxBytes;
+  const hasRate = seconds > 0 && rxDelta >= 0 && txDelta >= 0;
+  const rxBytesPerSec = hasRate ? rxDelta / seconds : 0;
+  const txBytesPerSec = hasRate ? txDelta / seconds : 0;
+  const bytesPerSec = rxBytesPerSec + txBytesPerSec;
+  const previousAverage = Number(existing?.avgBytesPerSec || 0);
+  const avgBytesPerSec = hasRate ? smoothRate(previousAverage, bytesPerSec, sampleCount) : previousAverage;
+  const avgRxBytesPerSec = hasRate
+    ? smoothRate(Number(existing?.avgRxBytesPerSec || 0), rxBytesPerSec, sampleCount)
+    : Number(existing?.avgRxBytesPerSec || 0);
+  const avgTxBytesPerSec = hasRate
+    ? smoothRate(Number(existing?.avgTxBytesPerSec || 0), txBytesPerSec, sampleCount)
+    : Number(existing?.avgTxBytesPerSec || 0);
+  const peakBytesPerSec = hasRate
+    ? Math.max(Number(existing?.peakBytesPerSec || 0), bytesPerSec)
+    : Number(existing?.peakBytesPerSec || 0);
+  const quietThreshold = Math.max(512, avgBytesPerSec * 0.12);
+  const quietCycles = hasRate && avgBytesPerSec > 512 && bytesPerSec < quietThreshold
+    ? Number(existing?.quietCycles || 0) + 1
+    : 0;
+
+  return {
+    hasRate,
+    seconds,
+    bytesPerSec,
+    rxBytesPerSec,
+    txBytesPerSec,
+    avgBytesPerSec,
+    avgRxBytesPerSec,
+    avgTxBytesPerSec,
+    peakBytesPerSec,
+    quietCycles
+  };
+}
+
+function smoothRate(previousValue, nextValue, sampleCount) {
+  if (!Number.isFinite(previousValue) || previousValue <= 0 || sampleCount <= 2) {
+    return nextValue;
+  }
+
+  return previousValue * 0.75 + nextValue * 0.25;
 }
 
 function validateRouterPayload(payload = {}) {

@@ -11,6 +11,8 @@ import {
   Wand2
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { listFirewall } from "../../shared/api/firewallStore.js";
+import { analyzeIpam, suggestIpAddress } from "../../shared/api/ipamStore.js";
 import { listWireGuardKeys } from "../../shared/api/wireGuardKeyStore.js";
 import { listWireGuardTunnels, orchestrateWireGuardVpn } from "../../shared/api/wireGuardStore.js";
 import ConfirmDialog from "../../shared/ui/ConfirmDialog.jsx";
@@ -20,6 +22,7 @@ const initialPeerForm = {
   label: "",
   interfaceName: "",
   keyId: "",
+  segmentId: "",
   publicKey: "",
   allowedAddress: "",
   localSubnet: "",
@@ -38,23 +41,23 @@ const initialPeerForm = {
 const vpnTypes = [
   {
     id: "remote-access",
-    label: "Acceso remoto",
-    shortLabel: "Usuario o equipo",
-    detail: "Peer individual para soporte, usuario, notebook o equipo final.",
+    label: "Laptop a router",
+    shortLabel: "Usuario remoto",
+    detail: "Peer individual para laptop, PC o tecnico que entra seguro al router.",
     fields: ["Nombre", "Interfaz", "Llave", "IP del peer"],
     automation: ["Peer", "Puerto UDP", "Forward seguro", "Verificacion"]
   },
   {
     id: "site-to-site",
-    label: "Sitio a sitio",
+    label: "Router a router",
     shortLabel: "Red contra red",
-    detail: "Une dos redes con ruta hacia el segmento remoto.",
+    detail: "Une dos routers con ruta hacia una red remota sin solapar segmentos.",
     fields: ["Nombre", "Interfaz", "Llave", "Red local", "Red remota"],
     automation: ["Peer", "Firewall", "Ruta remota", "Verificacion"]
   },
   {
     id: "branch-nat",
-    label: "Sede con NAT",
+    label: "Sucursal con NAT",
     shortLabel: "Sucursal simple",
     detail: "Conecta una sede remota usando masquerade por el tunel.",
     fields: ["Nombre", "Interfaz", "Llave", "Red local", "Red remota"],
@@ -62,9 +65,9 @@ const vpnTypes = [
   },
   {
     id: "trunk",
-    label: "Troncal",
-    shortLabel: "Transporte",
-    detail: "Enlace de transporte para segmentos o VLANs entre sedes.",
+    label: "Troncal de red",
+    shortLabel: "VLAN o transporte",
+    detail: "Enlace de transporte para segmentos, VLANs o rutas entre sedes.",
     fields: ["Nombre", "Interfaz", "Llave", "Segmento remoto"],
     automation: ["Peer", "Firewall", "Ruta troncal", "Verificacion"]
   }
@@ -80,6 +83,10 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
   const [confirmCreateOpen, setConfirmCreateOpen] = useState(false);
   const [actionState, setActionState] = useState({ type: "idle", message: "" });
   const [lastRunSteps, setLastRunSteps] = useState([]);
+  const [ipamAnalysis, setIpamAnalysis] = useState(null);
+  const [firewallState, setFirewallState] = useState({ rules: [], findings: [] });
+  const [isNetworkIntelLoading, setIsNetworkIntelLoading] = useState(false);
+  const [isSuggestingIp, setIsSuggestingIp] = useState(false);
 
   const selectedRouterId = selectedRouter?.id || null;
   const selectedType = useMemo(
@@ -87,11 +94,19 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
     [peerForm.vpnType]
   );
   const validation = useMemo(() => validatePeerForm(peerForm), [peerForm]);
+  const preflight = useMemo(
+    () => buildVpnPreflight(peerForm, selectedRouter, tunnels, ipamAnalysis, firewallState),
+    [peerForm, selectedRouter, tunnels, ipamAnalysis, firewallState]
+  );
   const totalTraffic = useMemo(
     () => tunnels.reduce((sum, tunnel) => sum + tunnel.rxBytes + tunnel.txBytes, 0),
     [tunnels]
   );
-  const readiness = useMemo(() => buildReadiness(peerForm), [peerForm]);
+  const readiness = useMemo(() => buildReadiness(peerForm, preflight), [peerForm, preflight]);
+  const candidateSegments = useMemo(
+    () => getCandidateSegments(ipamAnalysis, peerForm.vpnType),
+    [ipamAnalysis, peerForm.vpnType]
+  );
 
   async function refreshTunnels() {
     setIsLoading(true);
@@ -104,6 +119,28 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
       setKeys(nextKeys);
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function refreshNetworkIntel() {
+    if (!selectedRouterId) {
+      setIpamAnalysis(null);
+      setFirewallState({ rules: [], findings: [] });
+      return;
+    }
+
+    setIsNetworkIntelLoading(true);
+    try {
+      const [nextIpam, nextFirewall] = await Promise.all([
+        analyzeIpam(selectedRouterId),
+        listFirewall(selectedRouterId)
+      ]);
+      setIpamAnalysis(nextIpam);
+      setFirewallState(nextFirewall);
+    } catch (error) {
+      setActionState({ type: "error", message: error.message || "No se pudo analizar IPAM y firewall." });
+    } finally {
+      setIsNetworkIntelLoading(false);
     }
   }
 
@@ -151,12 +188,13 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
       return;
     }
 
-    if (!validation.canSubmit) {
-      setActionState({ type: "error", message: validation.errors[0] || "Revisa los datos de la VPN." });
+    if (!validation.canSubmit || preflight.blocking.length > 0) {
+      const message = validation.errors[0] || preflight.blocking[0]?.label || "Revisa los datos de la VPN.";
+      setActionState({ type: "error", message });
       onNotify?.({
         type: "warning",
         title: "Datos incompletos",
-        detail: validation.errors[0] || "Revisa los datos de la VPN."
+        detail: message
       });
       return;
     }
@@ -182,6 +220,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
       setShowAdvanced(false);
       setLastRunSteps(result.steps || []);
       await refreshTunnels();
+      await refreshNetworkIntel();
       await onWorkspaceRefresh?.({ silent: true });
       setActionState({ type: "success", message: "VPN orquestada y verificada con lectura actualizada." });
       onNotify?.({
@@ -209,12 +248,37 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
     setPeerForm((current) => ({
       ...current,
       vpnType,
+      segmentId: "",
+      allowedAddress: "",
       enableNat: vpnType === "branch-nat" ? true : current.enableNat
     }));
   }
 
+  async function handleSuggestIp() {
+    if (!peerForm.segmentId) {
+      setActionState({ type: "error", message: "Selecciona un segmento IPAM antes de sugerir IP." });
+      return;
+    }
+
+    setIsSuggestingIp(true);
+    setActionState({ type: "idle", message: "" });
+    try {
+      const suggestion = await suggestIpAddress({ segmentId: peerForm.segmentId });
+      updatePeerField("allowedAddress", `${suggestion.ipAddress}/32`);
+      setActionState({ type: "success", message: `IP sugerida desde IPAM: ${suggestion.ipAddress}/32.` });
+    } catch (error) {
+      setActionState({ type: "error", message: error.message || "No se pudo sugerir una IP libre." });
+    } finally {
+      setIsSuggestingIp(false);
+    }
+  }
+
   useEffect(() => {
     refreshTunnels();
+  }, [selectedRouterId]);
+
+  useEffect(() => {
+    refreshNetworkIntel();
   }, [selectedRouterId]);
 
   return (
@@ -311,14 +375,40 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                   {validation.fieldErrors.interfaceName && <span className="field-error">{validation.fieldErrors.interfaceName}</span>}
                 </label>
                 <label className="field-label">
-                  IP del peer
-                  <input
+                  Segmento IPAM
+                  <select
                     className="field-input"
-                    onChange={(event) => updatePeerField("allowedAddress", event.target.value)}
-                    placeholder="Ej. 10.70.8.10/32"
-                    required
-                    value={peerForm.allowedAddress}
-                  />
+                    onChange={(event) => updatePeerField("segmentId", event.target.value)}
+                    value={peerForm.segmentId}
+                  >
+                    <option value="">{isNetworkIntelLoading ? "Analizando segmentos" : "Seleccionar segmento"}</option>
+                    {candidateSegments.map((segment) => (
+                      <option key={segment.id} value={segment.id}>
+                        {segment.label} - {segment.networkCidr || segment.cidr} - libre {segment.freeEstimate}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-label">
+                  IP del peer
+                  <div className="field-with-action">
+                    <input
+                      className="field-input"
+                      onChange={(event) => updatePeerField("allowedAddress", event.target.value)}
+                      placeholder="Ej. 10.70.8.10/32"
+                      required
+                      value={peerForm.allowedAddress}
+                    />
+                    <button
+                      className="mini-action-button"
+                      disabled={isSuggestingIp || !peerForm.segmentId}
+                      onClick={handleSuggestIp}
+                      type="button"
+                    >
+                      <Wand2 size={14} />
+                      <span>{isSuggestingIp ? "..." : "Sugerir"}</span>
+                    </button>
+                  </div>
                   {validation.fieldErrors.allowedAddress && <span className="field-error">{validation.fieldErrors.allowedAddress}</span>}
                 </label>
                 {peerForm.vpnType !== "remote-access" && (
@@ -510,6 +600,16 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
               ))}
             </div>
 
+            <div className="preflight-box">
+              <p>Analisis previo</p>
+              {preflight.items.map((item) => (
+                <div className={`preflight-item preflight-item-${item.severity}`} key={item.label}>
+                  <strong>{item.label}</strong>
+                  <span>{item.detail}</span>
+                </div>
+              ))}
+            </div>
+
             <div className="automation-box">
               <p>Se ejecutara</p>
               {selectedType.automation.map((item) => (
@@ -528,7 +628,11 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
               </div>
             )}
 
-            <button className="primary-button w-full" disabled={isPeerSaving || !selectedRouter || !validation.canSubmit} type="submit">
+            <button
+              className="primary-button w-full"
+              disabled={isPeerSaving || !selectedRouter || !validation.canSubmit || preflight.blocking.length > 0}
+              type="submit"
+            >
               <Plus size={16} />
               {isPeerSaving ? "Orquestando VPN" : "Crear VPN completa"}
             </button>
@@ -631,12 +735,13 @@ function SummaryTile({ label, value }) {
   );
 }
 
-function buildReadiness(form) {
+function buildReadiness(form, preflight) {
   const items = [
     { label: "Tipo elegido", ready: Boolean(form.vpnType) },
     { label: "Interfaz", ready: Boolean(form.interfaceName) },
     { label: "IP del peer", ready: Boolean(form.allowedAddress) },
-    { label: "Llave publica", ready: Boolean(form.keyId || form.publicKey) }
+    { label: "Llave publica", ready: Boolean(form.keyId || form.publicKey) },
+    { label: "Sin bloqueo previo", ready: preflight.blocking.length === 0 }
   ];
 
   if (form.vpnType !== "remote-access") {
@@ -644,6 +749,138 @@ function buildReadiness(form) {
   }
 
   return items;
+}
+
+function buildVpnPreflight(form, selectedRouter, tunnels, ipamAnalysis, firewallState) {
+  const items = [];
+  const blocking = [];
+  const normalizedAllowed = String(form.allowedAddress || "").trim();
+  const duplicatePeer = normalizedAllowed
+    ? tunnels.some((tunnel) => String(tunnel.allowedAddress || "").trim() === normalizedAllowed)
+    : false;
+  const selectedSegment = ipamAnalysis?.segments?.find((segment) => segment.id === form.segmentId) || null;
+  const peerIp = normalizedAllowed.split("/")[0];
+  const peerInSegment = selectedSegment && isIpv4(peerIp)
+    ? cidrContainsIp(selectedSegment.networkCidr || selectedSegment.cidr, peerIp)
+    : false;
+  const remoteOverlap = ["site-to-site", "branch-nat", "trunk"].includes(form.vpnType) && isCidr(form.remoteSubnet)
+    ? findOverlappingSegment(form.remoteSubnet, ipamAnalysis?.segments || [])
+    : null;
+  const ipamErrors = (ipamAnalysis?.findings || []).filter((finding) => finding.severity === "error");
+  const firewallErrors = (firewallState?.findings || []).filter((finding) => finding.severity === "error");
+  const firewallWarnings = (firewallState?.findings || []).filter((finding) => finding.severity === "warning");
+
+  items.push({
+    severity: selectedRouter ? "ok" : "error",
+    label: "Router seleccionado",
+    detail: selectedRouter ? `${selectedRouter.alias} sera el origen de la orquestacion.` : "Selecciona un router real antes de aplicar."
+  });
+
+  items.push({
+    severity: selectedSegment ? "ok" : "warning",
+    label: "Segmento IPAM",
+    detail: selectedSegment
+      ? `${selectedSegment.label} tiene ${selectedSegment.freeEstimate} IP(s) estimadas libres.`
+      : "Selecciona o sincroniza un segmento para sugerir IP y validar espacio."
+  });
+
+  if (duplicatePeer) {
+    blocking.push({
+      label: "Allowed address duplicado",
+      detail: "La IP del peer ya existe en un tunel sincronizado."
+    });
+  }
+
+  items.push({
+    severity: duplicatePeer ? "error" : normalizedAllowed ? "ok" : "warning",
+    label: "Peer sin duplicado",
+    detail: duplicatePeer
+      ? "La direccion ya esta asignada a otro peer WireGuard."
+      : normalizedAllowed ? "No se encontro un peer sincronizado con la misma direccion." : "Ingresa o sugiere una IP para validar."
+  });
+
+  if (selectedSegment && normalizedAllowed && !peerInSegment) {
+    blocking.push({
+      label: "IP fuera del segmento",
+      detail: "La IP del peer no pertenece al segmento IPAM seleccionado."
+    });
+  }
+
+  items.push({
+    severity: !selectedSegment || !normalizedAllowed || peerInSegment ? "ok" : "error",
+    label: "IP dentro del segmento",
+    detail: !selectedSegment || !normalizedAllowed
+      ? "Se validara cuando elijas segmento e IP."
+      : peerInSegment ? "La IP pertenece al bloque seleccionado." : "La IP no pertenece al bloque seleccionado."
+  });
+
+  if (remoteOverlap) {
+    blocking.push({
+      label: "Red remota solapada",
+      detail: `${form.remoteSubnet} se cruza con ${remoteOverlap.label}.`
+    });
+  }
+
+  if (form.vpnType !== "remote-access") {
+    items.push({
+      severity: remoteOverlap ? "error" : isCidr(form.remoteSubnet) ? "ok" : "warning",
+      label: "Ruta remota sin solape",
+      detail: remoteOverlap
+        ? `Solapa con ${remoteOverlap.label} (${remoteOverlap.networkCidr || remoteOverlap.cidr}).`
+        : isCidr(form.remoteSubnet) ? "No cruza con segmentos locales sincronizados." : "Ingresa la red remota para revisar solape."
+    });
+  }
+
+  if (ipamErrors.length > 0) {
+    blocking.push({
+      label: "IPAM con conflictos",
+      detail: `${ipamErrors.length} conflicto(s) IPAM deben revisarse antes de crear VPN.`
+    });
+  }
+
+  items.push({
+    severity: ipamErrors.length > 0 ? "error" : "ok",
+    label: "Conflictos IPAM",
+    detail: ipamErrors.length > 0 ? `${ipamErrors.length} hallazgo(s) critico(s).` : "Sin conflictos IPAM criticos."
+  });
+
+  items.push({
+    severity: firewallErrors.length > 0 ? "error" : firewallWarnings.length > 0 ? "warning" : "ok",
+    label: "Firewall revisado",
+    detail: firewallErrors.length > 0
+      ? `${firewallErrors.length} bloqueo(s) critico(s) detectado(s).`
+      : firewallWarnings.length > 0 ? `${firewallWarnings.length} advertencia(s), se aplicaran reglas necesarias si procede.` : "No hay bloqueos firewall criticos guardados."
+  });
+
+  if (firewallErrors.length > 0) {
+    blocking.push({
+      label: "Firewall bloqueante",
+      detail: `${firewallErrors.length} regla(s) pueden impedir acceso al tunel.`
+    });
+  }
+
+  return {
+    items,
+    blocking
+  };
+}
+
+function getCandidateSegments(ipamAnalysis, vpnType) {
+  const segments = ipamAnalysis?.segments || [];
+  const priority = {
+    "remote-access": ["vpn", "wireguard", "unknown"],
+    "site-to-site": ["vpn", "trunk", "lan", "unknown"],
+    "branch-nat": ["vpn", "lan", "unknown"],
+    trunk: ["trunk", "vpn", "unknown"]
+  }[vpnType] || ["unknown"];
+
+  return [...segments]
+    .filter((segment) => segment.nextAvailableIp)
+    .sort((first, second) => {
+      const firstRank = priority.includes(first.purpose) ? priority.indexOf(first.purpose) : priority.length;
+      const secondRank = priority.includes(second.purpose) ? priority.indexOf(second.purpose) : priority.length;
+      return firstRank - secondRank || first.utilization - second.utilization;
+    });
 }
 
 function validatePeerForm(form) {
@@ -705,6 +942,54 @@ function isCidr(value) {
   return isIpv4(ip) && Number.isInteger(prefix) && prefix >= 0 && prefix <= 32;
 }
 
+function cidrContainsIp(cidr, ipAddress) {
+  const range = parseCidr(cidr);
+  const ip = ipv4ToInt(ipAddress);
+
+  if (!range || ip === null) {
+    return false;
+  }
+
+  return ip >= range.start && ip <= range.end;
+}
+
+function findOverlappingSegment(cidr, segments) {
+  const range = parseCidr(cidr);
+
+  if (!range) {
+    return null;
+  }
+
+  return segments.find((segment) => {
+    const segmentRange = parseCidr(segment.networkCidr || segment.cidr);
+    return segmentRange && rangesOverlap(range, segmentRange);
+  }) || null;
+}
+
+function parseCidr(cidr) {
+  const [ip, prefixText] = String(cidr || "").trim().split("/");
+  const prefix = Number(prefixText);
+  const intIp = ipv4ToInt(ip);
+
+  if (intIp === null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+    return null;
+  }
+
+  const hostBits = 32 - prefix;
+  const size = 2 ** hostBits;
+  const start = Math.floor(intIp / size) * size;
+
+  return {
+    start,
+    end: start + size - 1,
+    prefix
+  };
+}
+
+function rangesOverlap(first, second) {
+  return first.start <= second.end && second.start <= first.end;
+}
+
 function isIpv4(value) {
   const parts = String(value || "").trim().split(".");
 
@@ -720,6 +1005,17 @@ function isIpv4(value) {
     const number = Number(part);
     return Number.isInteger(number) && number >= 0 && number <= 255;
   });
+}
+
+function ipv4ToInt(value) {
+  if (!isIpv4(value)) {
+    return null;
+  }
+
+  return String(value)
+    .trim()
+    .split(".")
+    .reduce((total, part) => total * 256 + Number(part), 0);
 }
 
 function isPort(value) {

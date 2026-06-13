@@ -192,6 +192,27 @@ function Dashboard({
             </div>
           </div>
 
+          <div className="mb-4 grid grid-cols-2 gap-3">
+            <LearningTile label="Perfiles" value={monitoring.learningSummary?.profileCount || 0} />
+            <LearningTile label="Entrenados" value={monitoring.learningSummary?.trainedProfiles || 0} />
+            <LearningTile label="Silencio" value={monitoring.learningSummary?.quietProfiles || 0} />
+            <LearningTile label="Pico local" value={`${formatRate(monitoring.learningSummary?.peakBps || 0)}/s`} />
+          </div>
+
+          {(monitoring.profiles || []).length > 0 && (
+            <div className="mb-4 grid gap-2">
+              {(monitoring.profiles || []).slice(0, 3).map((profile) => (
+                <article className="learned-profile" key={profile.id}>
+                  <div>
+                    <strong>{profile.label}</strong>
+                    <span>{profile.routerAlias || "Router"} - {profile.sampleCount} muestra(s)</span>
+                  </div>
+                  <small>{formatRate(profile.avgBytesPerSec || 0)}/s</small>
+                </article>
+              ))}
+            </div>
+          )}
+
           <div className="grid gap-3">
             {(monitoring.findings || []).slice(0, 4).map((finding) => (
               <InsightRow finding={finding} key={`${finding.title}-${finding.detail}`} />
@@ -274,6 +295,15 @@ function TelemetryTile({ icon: Icon, label, value }) {
   return (
     <article className="telemetry-tile">
       <Icon size={17} />
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
+
+function LearningTile({ label, value }) {
+  return (
+    <article className="learning-tile">
       <span>{label}</span>
       <strong>{value}</strong>
     </article>
