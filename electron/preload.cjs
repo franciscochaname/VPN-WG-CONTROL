@@ -35,6 +35,10 @@ contextBridge.exposeInMainWorld("vpnWgControl", {
     status: () => ipcRenderer.invoke("events:status"),
     list: (limit) => ipcRenderer.invoke("events:list", limit)
   },
+  monitor: {
+    status: () => ipcRenderer.invoke("monitor:status"),
+    runOnce: () => ipcRenderer.invoke("monitor:run-once")
+  },
   ipam: {
     list: (routerId) => ipcRenderer.invoke("ipam:list", routerId),
     sync: (routerId) => ipcRenderer.invoke("ipam:sync", routerId),

@@ -98,6 +98,20 @@ export async function getDashboardSnapshot() {
         }
       ]
     },
+    continuousMonitor: {
+      enabled: false,
+      running: false,
+      intervalMs: 30000,
+      lastStartedAt: null,
+      lastCompletedAt: null,
+      lastError: null,
+      lastSummary: {
+        checkedRouters: 0,
+        syncedRouters: 0,
+        failedRouters: 0,
+        skippedRouters: 0
+      }
+    },
     metrics: {
       routers: browserRouters.length,
       tunnels: 0,
@@ -111,6 +125,35 @@ export async function getDashboardSnapshot() {
       handshakeMissing: 0
     }
   };
+}
+
+export async function getContinuousMonitorStatus() {
+  if (electronApi()?.monitor) {
+    return electronApi().monitor.status();
+  }
+
+  return {
+    enabled: false,
+    running: false,
+    intervalMs: 30000,
+    lastStartedAt: null,
+    lastCompletedAt: null,
+    lastError: null,
+    lastSummary: {
+      checkedRouters: 0,
+      syncedRouters: 0,
+      failedRouters: 0,
+      skippedRouters: 0
+    }
+  };
+}
+
+export async function runContinuousMonitorOnce() {
+  if (electronApi()?.monitor) {
+    return electronApi().monitor.runOnce();
+  }
+
+  throw new Error("El monitor continuo real solo esta disponible en la app instalada.");
 }
 
 export function isElectronPersistenceAvailable() {

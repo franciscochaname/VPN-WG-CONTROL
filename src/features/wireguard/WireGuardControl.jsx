@@ -86,6 +86,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
     () => vpnTypes.find((type) => type.id === peerForm.vpnType) || vpnTypes[0],
     [peerForm.vpnType]
   );
+  const validation = useMemo(() => validatePeerForm(peerForm), [peerForm]);
   const totalTraffic = useMemo(
     () => tunnels.reduce((sum, tunnel) => sum + tunnel.rxBytes + tunnel.txBytes, 0),
     [tunnels]
@@ -146,6 +147,16 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
         type: "warning",
         title: "Router requerido",
         detail: "Selecciona un router en el panel lateral para continuar."
+      });
+      return;
+    }
+
+    if (!validation.canSubmit) {
+      setActionState({ type: "error", message: validation.errors[0] || "Revisa los datos de la VPN." });
+      onNotify?.({
+        type: "warning",
+        title: "Datos incompletos",
+        detail: validation.errors[0] || "Revisa los datos de la VPN."
       });
       return;
     }
@@ -286,6 +297,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                     placeholder="Ej. soporte-remoto"
                     value={peerForm.label}
                   />
+                  {validation.fieldErrors.label && <span className="field-error">{validation.fieldErrors.label}</span>}
                 </label>
                 <label className="field-label">
                   Interfaz
@@ -296,6 +308,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                     required
                     value={peerForm.interfaceName}
                   />
+                  {validation.fieldErrors.interfaceName && <span className="field-error">{validation.fieldErrors.interfaceName}</span>}
                 </label>
                 <label className="field-label">
                   IP del peer
@@ -306,6 +319,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                     required
                     value={peerForm.allowedAddress}
                   />
+                  {validation.fieldErrors.allowedAddress && <span className="field-error">{validation.fieldErrors.allowedAddress}</span>}
                 </label>
                 {peerForm.vpnType !== "remote-access" && (
                   <label className="field-label">
@@ -317,6 +331,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                       required
                       value={peerForm.remoteSubnet}
                     />
+                    {validation.fieldErrors.remoteSubnet && <span className="field-error">{validation.fieldErrors.remoteSubnet}</span>}
                   </label>
                 )}
                 {peerForm.vpnType !== "remote-access" && (
@@ -328,6 +343,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                       placeholder="Ej. 192.168.20.0/24"
                       value={peerForm.localSubnet}
                     />
+                    {validation.fieldErrors.localSubnet && <span className="field-error">{validation.fieldErrors.localSubnet}</span>}
                   </label>
                 )}
               </div>
@@ -368,6 +384,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                       required
                       value={peerForm.publicKey}
                     />
+                    {validation.fieldErrors.publicKey && <span className="field-error">{validation.fieldErrors.publicKey}</span>}
                   </label>
                 )}
               </div>
@@ -390,6 +407,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                     type="number"
                     value={peerForm.listenPort}
                   />
+                  {validation.fieldErrors.listenPort && <span className="field-error">{validation.fieldErrors.listenPort}</span>}
                 </label>
                 <label className="field-label">
                   Endpoint address
@@ -411,6 +429,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                     type="number"
                     value={peerForm.endpointPort}
                   />
+                  {validation.fieldErrors.endpointPort && <span className="field-error">{validation.fieldErrors.endpointPort}</span>}
                 </label>
                 <label className="field-label">
                   Persistent keepalive
@@ -432,6 +451,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                       type="number"
                       value={peerForm.routeDistance}
                     />
+                    {validation.fieldErrors.routeDistance && <span className="field-error">{validation.fieldErrors.routeDistance}</span>}
                   </label>
                 )}
                 <label className="field-label">
@@ -497,7 +517,18 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
               ))}
             </div>
 
-            <button className="primary-button w-full" disabled={isPeerSaving || !selectedRouter} type="submit">
+            {validation.errors.length > 0 && (
+              <div className="readiness-list">
+                {validation.errors.slice(0, 3).map((error) => (
+                  <div className="readiness-item" key={error}>
+                    <CheckCircle2 size={15} />
+                    <span>{error}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button className="primary-button w-full" disabled={isPeerSaving || !selectedRouter || !validation.canSubmit} type="submit">
               <Plus size={16} />
               {isPeerSaving ? "Orquestando VPN" : "Crear VPN completa"}
             </button>
@@ -613,6 +644,87 @@ function buildReadiness(form) {
   }
 
   return items;
+}
+
+function validatePeerForm(form) {
+  const fieldErrors = {};
+  const errors = [];
+
+  if (!form.interfaceName.trim()) {
+    fieldErrors.interfaceName = "Interfaz requerida.";
+  }
+
+  if (!isCidr(form.allowedAddress)) {
+    fieldErrors.allowedAddress = "Usa CIDR IPv4. Ej. 10.70.8.10/32.";
+  }
+
+  if (!form.keyId && !isWireGuardPublicKey(form.publicKey)) {
+    fieldErrors.publicKey = "Llave publica WireGuard invalida.";
+  }
+
+  if (["site-to-site", "branch-nat", "trunk"].includes(form.vpnType) && !isCidr(form.remoteSubnet)) {
+    fieldErrors.remoteSubnet = "Red remota CIDR requerida.";
+  }
+
+  if (form.localSubnet && !isCidr(form.localSubnet)) {
+    fieldErrors.localSubnet = "Red local CIDR invalida.";
+  }
+
+  if (!isPort(form.listenPort)) {
+    fieldErrors.listenPort = "Puerto WireGuard invalido.";
+  }
+
+  if (form.endpointPort && !isPort(form.endpointPort)) {
+    fieldErrors.endpointPort = "Puerto endpoint invalido.";
+  }
+
+  const routeDistance = Number(form.routeDistance || 1);
+  if (!Number.isInteger(routeDistance) || routeDistance < 1 || routeDistance > 255) {
+    fieldErrors.routeDistance = "Distancia entre 1 y 255.";
+  }
+
+  for (const error of Object.values(fieldErrors)) {
+    errors.push(error);
+  }
+
+  return {
+    canSubmit: errors.length === 0,
+    errors,
+    fieldErrors
+  };
+}
+
+function isWireGuardPublicKey(value) {
+  return /^[A-Za-z0-9+/]{43}=$/.test(value || "");
+}
+
+function isCidr(value) {
+  const [ip, prefixText] = String(value || "").trim().split("/");
+  const prefix = Number(prefixText);
+
+  return isIpv4(ip) && Number.isInteger(prefix) && prefix >= 0 && prefix <= 32;
+}
+
+function isIpv4(value) {
+  const parts = String(value || "").trim().split(".");
+
+  if (parts.length !== 4) {
+    return false;
+  }
+
+  return parts.every((part) => {
+    if (!/^\d+$/.test(part)) {
+      return false;
+    }
+
+    const number = Number(part);
+    return Number.isInteger(number) && number >= 0 && number <= 255;
+  });
+}
+
+function isPort(value) {
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1 && port <= 65535;
 }
 
 function formatBytes(value) {

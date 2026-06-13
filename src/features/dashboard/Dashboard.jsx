@@ -2,6 +2,7 @@ import { Activity, BellRing, BrainCircuit, Clock3, DatabaseZap, Gauge, Network, 
 import { useEffect, useState } from "react";
 import MetricCard from "../../shared/ui/MetricCard.jsx";
 import { getEventServerStatus, listEvents } from "../../shared/api/eventStore.js";
+import { runContinuousMonitorOnce } from "../../shared/api/routerStore.js";
 import TopologyMap from "./TopologyMap.jsx";
 
 function buildStats(metrics) {
@@ -32,6 +33,7 @@ function Dashboard({
   isLoading,
   metrics,
   monitoring,
+  continuousMonitor,
   routers,
   tunnels,
   selectedRouter,
@@ -41,6 +43,7 @@ function Dashboard({
   const stats = buildStats(metrics);
   const [syncMessage, setSyncMessage] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isRunningMonitor, setIsRunningMonitor] = useState(false);
   const [eventStatus, setEventStatus] = useState(monitoring.eventServer || {});
   const [events, setEvents] = useState([]);
 
@@ -60,6 +63,21 @@ function Dashboard({
       setSyncMessage(error.message || "No se pudo leer WireGuard desde el router.");
     } finally {
       setIsSyncing(false);
+    }
+  }
+
+  async function handleRunContinuousMonitor() {
+    setIsRunningMonitor(true);
+    setSyncMessage("");
+
+    try {
+      const status = await runContinuousMonitorOnce();
+      const summary = status.lastSummary || {};
+      setSyncMessage(`Monitor continuo: ${summary.syncedRouters || 0} router(s) sincronizados, ${summary.failedRouters || 0} fallidos.`);
+    } catch (error) {
+      setSyncMessage(error.message || "No se pudo ejecutar el monitor continuo.");
+    } finally {
+      setIsRunningMonitor(false);
     }
   }
 
@@ -129,6 +147,24 @@ function Dashboard({
               <span>Ultima muestra</span>
               <strong>{formatDateTime(monitoring.latestSampleAt)}</strong>
             </div>
+            <div className="monitor-strip">
+              <span>Monitor continuo</span>
+              <strong>{continuousMonitor?.enabled ? `${Math.round((continuousMonitor.intervalMs || 30000) / 1000)}s` : "apagado"}</strong>
+            </div>
+            <div className="monitor-strip">
+              <span>Ultimo ciclo</span>
+              <strong>{formatMonitorSummary(continuousMonitor)}</strong>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warm-line bg-[#fff9ef] px-3 py-2">
+            <span className="text-sm font-semibold text-warm-muted">
+              {continuousMonitor?.running ? "Leyendo routers online en segundo plano." : `Ultima pasada: ${formatDateTime(continuousMonitor?.lastCompletedAt)}`}
+            </span>
+            <button className="icon-text-button" disabled={isRunningMonitor} onClick={handleRunContinuousMonitor} type="button">
+              <RefreshCw className={isRunningMonitor ? "animate-spin" : ""} size={15} />
+              Ejecutar ciclo
+            </button>
           </div>
 
           {syncMessage && <div className="mt-4 rounded-lg bg-[#fff9ef] px-3 py-2 text-sm font-semibold text-warm-muted">{syncMessage}</div>}
@@ -288,6 +324,22 @@ function formatDateTime(value) {
     minute: "2-digit",
     second: "2-digit"
   }).format(new Date(value));
+}
+
+function formatMonitorSummary(continuousMonitor = {}) {
+  const summary = continuousMonitor.lastSummary || {};
+  const synced = summary.syncedRouters || 0;
+  const failed = summary.failedRouters || 0;
+
+  if (!continuousMonitor.lastCompletedAt) {
+    return "sin ciclo";
+  }
+
+  if (failed > 0) {
+    return `${synced} ok / ${failed} falla`;
+  }
+
+  return `${synced} ok`;
 }
 
 export default Dashboard;

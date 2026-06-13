@@ -119,3 +119,7 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego analisis local de capacidad IP, redes superpuestas, IPs duplicadas, rutas WireGuard y proxima IP disponible.
 - Se agrego reserva guiada de IP con sugerencia automatica y bloqueo contra IPs ya usadas por inventario real o WireGuard.
 - Se rediseno la vista `Segmentos` con motor IPAM, tarjetas de salud, barras de utilizacion y detalle de reservas/rutas sin datos inventados.
+- Se agrego monitor continuo real en Electron para sincronizar routers `online` cada 30 segundos sin depender de una vista abierta.
+- Se agrego estado visible del monitor continuo en el dashboard con ultima pasada, resumen y ejecucion manual de ciclo.
+- Se rediseno el registro de router como asistente por pasos con validacion en vivo y guia RouterOS para API, WebFig, firewall y syslog.
+- Se agregaron validaciones frontales al asistente WireGuard para CIDR, llave publica, puertos y rutas antes de orquestar VPN.

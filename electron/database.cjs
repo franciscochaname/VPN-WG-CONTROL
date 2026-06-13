@@ -20,6 +20,21 @@ const { generateWireGuardKeyPair } = require("./wireguardKeys.cjs");
 
 let db;
 let databaseFilePath;
+let monitorTimer = null;
+let monitorRunning = false;
+const monitorState = {
+  enabled: false,
+  intervalMs: 30000,
+  lastStartedAt: null,
+  lastCompletedAt: null,
+  lastError: null,
+  lastSummary: {
+    checkedRouters: 0,
+    syncedRouters: 0,
+    failedRouters: 0,
+    skippedRouters: 0
+  }
+};
 
 function initializeDatabase(userDataPath) {
   const databaseDir = path.join(userDataPath, "data");
@@ -240,6 +255,8 @@ function registerRouterHandlers(ipcMain) {
   ipcMain.handle("firewall:apply-preset", (_event, payload) => applyFirewallPreset(payload));
   ipcMain.handle("events:status", () => getLiveEventStatus());
   ipcMain.handle("events:list", (_event, limit) => listLiveEvents(limit));
+  ipcMain.handle("monitor:status", () => getContinuousMonitorStatus());
+  ipcMain.handle("monitor:run-once", () => runContinuousMonitorCycle("manual"));
   ipcMain.handle("ipam:list", (_event, routerId) => listIpSegments(routerId));
   ipcMain.handle("ipam:sync", (_event, routerId) => syncIpInventory(routerId));
   ipcMain.handle("ipam:create", (_event, payload) => createIpSegment(payload));
@@ -475,6 +492,108 @@ async function syncWireGuard(routerId) {
   }
 }
 
+function startContinuousMonitor(options = {}) {
+  assertDatabase();
+  const intervalMs = Number(options.intervalMs || monitorState.intervalMs);
+  monitorState.enabled = true;
+  monitorState.intervalMs = Number.isInteger(intervalMs) && intervalMs >= 15000 ? intervalMs : 30000;
+
+  if (monitorTimer) {
+    return getContinuousMonitorStatus();
+  }
+
+  monitorTimer = setInterval(() => {
+    runContinuousMonitorCycle("interval").catch(() => {});
+  }, monitorState.intervalMs);
+
+  setTimeout(() => {
+    runContinuousMonitorCycle("startup").catch(() => {});
+  }, 2500);
+
+  return getContinuousMonitorStatus();
+}
+
+function stopContinuousMonitor() {
+  if (monitorTimer) {
+    clearInterval(monitorTimer);
+    monitorTimer = null;
+  }
+
+  monitorState.enabled = false;
+  return getContinuousMonitorStatus();
+}
+
+function getContinuousMonitorStatus() {
+  return {
+    ...monitorState,
+    running: monitorRunning,
+    nextIntervalSeconds: Math.round(monitorState.intervalMs / 1000)
+  };
+}
+
+async function runContinuousMonitorCycle(trigger = "manual") {
+  assertDatabase();
+
+  if (monitorRunning) {
+    return {
+      ...getContinuousMonitorStatus(),
+      skipped: true
+    };
+  }
+
+  monitorRunning = true;
+  monitorState.lastStartedAt = new Date().toISOString();
+  monitorState.lastError = null;
+
+  const summary = {
+    trigger,
+    checkedRouters: 0,
+    syncedRouters: 0,
+    failedRouters: 0,
+    skippedRouters: 0
+  };
+
+  try {
+    const routers = listRouters().filter((router) => router.monitorWireGuard);
+    const candidates = routers.filter((router) => router.status === "online");
+    summary.checkedRouters = candidates.length;
+    summary.skippedRouters = routers.length - candidates.length;
+
+    for (const router of candidates) {
+      if (!shouldMonitorRouter(router)) {
+        summary.skippedRouters += 1;
+        continue;
+      }
+
+      try {
+        await syncWireGuard(router.id);
+        summary.syncedRouters += 1;
+      } catch {
+        summary.failedRouters += 1;
+      }
+    }
+
+    monitorState.lastSummary = summary;
+    monitorState.lastCompletedAt = new Date().toISOString();
+    return getContinuousMonitorStatus();
+  } catch (error) {
+    monitorState.lastError = error.message;
+    monitorState.lastSummary = summary;
+    monitorState.lastCompletedAt = new Date().toISOString();
+    throw error;
+  } finally {
+    monitorRunning = false;
+  }
+}
+
+function shouldMonitorRouter(router) {
+  if (!router.lastSyncAt) {
+    return true;
+  }
+
+  return secondsBetween(new Date().toISOString(), router.lastSyncAt) >= Math.max(15, Math.floor(monitorState.intervalMs / 1000) - 2);
+}
+
 function getDashboardSnapshot() {
   assertDatabase();
   const routers = listRouters();
@@ -488,6 +607,7 @@ function getDashboardSnapshot() {
     routers,
     tunnels,
     monitoring,
+    continuousMonitor: getContinuousMonitorStatus(),
     metrics: {
       routers: routers.length,
       tunnels: tunnelCount,
@@ -2856,5 +2976,7 @@ function assertDatabase() {
 module.exports = {
   ingestLiveEvent,
   initializeDatabase,
-  registerRouterHandlers
+  registerRouterHandlers,
+  startContinuousMonitor,
+  stopContinuousMonitor
 };

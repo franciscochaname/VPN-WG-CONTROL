@@ -555,6 +555,12 @@ button {
   box-shadow: 0 0 0 3px rgba(229, 162, 58, 0.18);
 }
 
+.field-error {
+  color: #a94727;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -660,6 +666,76 @@ button {
 
 .service-dot-closed {
   background: #e98b73;
+}
+
+.router-wizard {
+  display: grid;
+  gap: 14px;
+}
+
+.router-stepper {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.router-step-tab {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: #73695f;
+  font-size: 0.86rem;
+  font-weight: 850;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.router-step-tab:hover,
+.router-step-tab-active {
+  transform: translateY(-1px);
+  border-color: #e5a23a;
+  background: #f4ead9;
+  color: #2a2520;
+}
+
+.router-step-panel {
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #fff9ef;
+  padding: 14px;
+  animation: modalIn 160ms ease-out;
+}
+
+.router-command-box {
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.router-command-box code {
+  display: block;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid #eadfce;
+  background: #2a2520;
+  color: #fff1d6;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 10px;
+  white-space: nowrap;
+}
+
+.router-validation-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #eadfce;
+  padding-top: 14px;
 }
 
 .form-message {

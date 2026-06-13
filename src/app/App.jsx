@@ -49,6 +49,20 @@ function App() {
     eventServer: {},
     findings: []
   });
+  const [continuousMonitor, setContinuousMonitor] = useState({
+    enabled: false,
+    running: false,
+    intervalMs: 30000,
+    lastStartedAt: null,
+    lastCompletedAt: null,
+    lastError: null,
+    lastSummary: {
+      checkedRouters: 0,
+      syncedRouters: 0,
+      failedRouters: 0,
+      skippedRouters: 0
+    }
+  });
   const [selectedRouterId, setSelectedRouterId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -91,6 +105,20 @@ function App() {
         eventServer: {},
         findings: []
       });
+      setContinuousMonitor(snapshot.continuousMonitor || {
+        enabled: false,
+        running: false,
+        intervalMs: 30000,
+        lastStartedAt: null,
+        lastCompletedAt: null,
+        lastError: null,
+        lastSummary: {
+          checkedRouters: 0,
+          syncedRouters: 0,
+          failedRouters: 0,
+          skippedRouters: 0
+        }
+      });
       setSelectedRouterId((currentId) => {
         if (snapshot.routers.some((router) => router.id === currentId)) {
           return currentId;
@@ -122,6 +150,7 @@ function App() {
     setTunnels(snapshot.tunnels || []);
     setMetrics(snapshot.metrics);
     setMonitoring(snapshot.monitoring || monitoring);
+    setContinuousMonitor(snapshot.continuousMonitor || continuousMonitor);
     return snapshot;
   }
 
@@ -157,6 +186,7 @@ function App() {
             isLoading={isLoading}
             metrics={metrics}
             monitoring={monitoring}
+            continuousMonitor={continuousMonitor}
             routers={routers}
             tunnels={tunnels}
             selectedRouter={selectedRouter}
@@ -187,6 +217,7 @@ function ContentView({
   isLoading,
   metrics,
   monitoring,
+  continuousMonitor,
   routers,
   tunnels,
   selectedRouter,
@@ -237,6 +268,7 @@ function ContentView({
       isLoading={isLoading}
       metrics={metrics}
       monitoring={monitoring}
+      continuousMonitor={continuousMonitor}
       routers={routers}
       tunnels={tunnels}
       selectedRouter={selectedRouter}
