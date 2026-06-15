@@ -188,9 +188,7 @@ function App() {
         />
 
         <TopCommandBar
-          continuousMonitor={continuousMonitor}
           selectedRouter={selectedRouter}
-          onNavigate={setActiveView}
         />
 
         {workspaceError && (

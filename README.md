@@ -140,3 +140,5 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego bloqueo backend contra puertos WireGuard en otra interfaz, reglas firewall `drop/reject` y parser seguro de listas/rangos de puertos.
 - Se rediseno el header para usar el espacio superior con marca, vista activa, metricas reales, estado del monitor y acciones rapidas.
 - Se verifico el header en escritorio y movil para evitar espacios vacios y desbordes horizontales.
+- Se compacto la franja de operacion segura para eliminar acciones duplicadas y usar todo el ancho con el flujo Backup-Aplicacion-Verificacion-Rollback.
+- Se redujo la redundancia visual entre header, franja superior y panel lateral, manteniendo acciones principales en una sola zona.

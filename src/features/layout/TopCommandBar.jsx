@@ -1,46 +1,31 @@
-import { CheckCircle2, DatabaseZap, GitBranch, Network, ShieldCheck, Wand2 } from "lucide-react";
+import { CheckCircle2, DatabaseZap, RotateCcw, ShieldCheck, Wand2 } from "lucide-react";
 
 function TopCommandBar({
-  continuousMonitor,
-  selectedRouter,
-  onNavigate
+  selectedRouter
 }) {
   const hasRouter = Boolean(selectedRouter);
   const stages = [
     { label: "Backup", detail: "antes de cambios", icon: DatabaseZap },
-    { label: "Inyeccion", detail: "solo por asistente", icon: Wand2 },
+    { label: "Aplicacion", detail: "asistida", icon: Wand2 },
     { label: "Verificacion", detail: "lectura RouterOS", icon: CheckCircle2 },
-    { label: "Monitoreo", detail: continuousMonitor?.enabled ? "continuo activo" : "en espera", icon: ShieldCheck }
+    { label: "Rollback", detail: "si falla", icon: RotateCcw }
   ];
 
   return (
     <section className="command-ribbon">
       <div className="command-ribbon-main">
         <div className="command-ribbon-icon">
-          <Wand2 size={20} />
+          <ShieldCheck size={20} />
         </div>
         <div className="min-w-0">
           <p>Operacion segura RouterOS</p>
-          <h2>{hasRouter ? selectedRouter.alias : "Sin router seleccionado"}</h2>
+          <h2>Flujo protegido de cambios</h2>
           <span>
-            VPN, firewall, rutas y NAT se ejecutan desde asistentes con respaldo, logs y verificacion final.
+            {hasRouter
+              ? `${selectedRouter.alias}: VPN, firewall, rutas y NAT se aplican con respaldo y verificacion.`
+              : "Selecciona o registra un router para habilitar orquestacion controlada."}
           </span>
         </div>
-      </div>
-
-      <div className="command-ribbon-actions">
-        <button className="primary-button" onClick={() => onNavigate(hasRouter ? "wireguard" : "routers")} type="button">
-          <Network size={16} />
-          {hasRouter ? "Crear VPN" : "Registrar router"}
-        </button>
-        <button className="action-button" onClick={() => onNavigate("firewall")} type="button">
-          <ShieldCheck size={16} />
-          Firewall
-        </button>
-        <button className="action-button" onClick={() => onNavigate("ipam")} type="button">
-          <GitBranch size={16} />
-          IPAM
-        </button>
       </div>
 
       <div className="command-flow">

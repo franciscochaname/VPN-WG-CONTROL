@@ -357,7 +357,7 @@ button {
 
 .command-ribbon {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(460px, 1.25fr);
+  grid-template-columns: minmax(330px, 0.8fr) minmax(560px, 1.4fr);
   gap: 12px;
   align-items: stretch;
   border-bottom: 1px solid rgba(234, 223, 206, 0.8);
@@ -365,7 +365,6 @@ button {
 }
 
 .command-ribbon-main,
-.command-ribbon-actions,
 .command-flow {
   border-radius: 8px;
   border: 1px solid #eadfce;
@@ -416,14 +415,6 @@ button {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.command-ribbon-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
 }
 
 .command-flow {
