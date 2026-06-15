@@ -177,7 +177,15 @@ function App() {
       <div className="pointer-events-none fixed inset-0 soft-grid" />
       <NotificationCenter notifications={notifications} onDismiss={dismissNotification} />
       <section className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-5 lg:px-8">
-        <Header routerCount={metrics.routers} />
+        <Header
+          activeView={activeView}
+          continuousMonitor={continuousMonitor}
+          metrics={metrics}
+          monitoring={monitoring}
+          notificationCount={notifications.length}
+          selectedRouter={selectedRouter}
+          onNavigate={setActiveView}
+        />
 
         <TopCommandBar
           continuousMonitor={continuousMonitor}

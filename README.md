@@ -138,3 +138,5 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego persistencia de `listen_port` por interfaz WireGuard sincronizada para validar puertos reales antes de crear VPN.
 - Se movio el puerto UDP al flujo principal del asistente VPN con sugerencia automatica y semaforo de conflicto.
 - Se agrego bloqueo backend contra puertos WireGuard en otra interfaz, reglas firewall `drop/reject` y parser seguro de listas/rangos de puertos.
+- Se rediseno el header para usar el espacio superior con marca, vista activa, metricas reales, estado del monitor y acciones rapidas.
+- Se verifico el header en escritorio y movil para evitar espacios vacios y desbordes horizontales.
