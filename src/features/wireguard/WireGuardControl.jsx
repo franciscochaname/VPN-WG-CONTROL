@@ -94,9 +94,13 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
     [peerForm.vpnType]
   );
   const validation = useMemo(() => validatePeerForm(peerForm), [peerForm]);
+  const portPlan = useMemo(
+    () => buildPortPlan(peerForm, selectedRouter, tunnels, firewallState),
+    [peerForm, selectedRouter, tunnels, firewallState]
+  );
   const preflight = useMemo(
-    () => buildVpnPreflight(peerForm, selectedRouter, tunnels, ipamAnalysis, firewallState),
-    [peerForm, selectedRouter, tunnels, ipamAnalysis, firewallState]
+    () => buildVpnPreflight(peerForm, selectedRouter, tunnels, ipamAnalysis, firewallState, portPlan),
+    [peerForm, selectedRouter, tunnels, ipamAnalysis, firewallState, portPlan]
   );
   const totalTraffic = useMemo(
     () => tunnels.reduce((sum, tunnel) => sum + tunnel.rxBytes + tunnel.txBytes, 0),
@@ -273,6 +277,10 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
     }
   }
 
+  function handleSuggestPort() {
+    updatePeerField("listenPort", String(portPlan.suggestedPort || 13231));
+  }
+
   useEffect(() => {
     refreshTunnels();
   }, [selectedRouterId]);
@@ -373,6 +381,25 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                     value={peerForm.interfaceName}
                   />
                   {validation.fieldErrors.interfaceName && <span className="field-error">{validation.fieldErrors.interfaceName}</span>}
+                </label>
+                <label className="field-label">
+                  Puerto UDP
+                  <div className="field-with-action">
+                    <input
+                      className="field-input"
+                      max="65535"
+                      min="1"
+                      onChange={(event) => updatePeerField("listenPort", event.target.value)}
+                      type="number"
+                      value={peerForm.listenPort}
+                    />
+                    <button className="mini-action-button" onClick={handleSuggestPort} type="button">
+                      <Wand2 size={14} />
+                      <span>Sugerir</span>
+                    </button>
+                  </div>
+                  {validation.fieldErrors.listenPort && <span className="field-error">{validation.fieldErrors.listenPort}</span>}
+                  <span className={`field-hint field-hint-${portPlan.severity}`}>{portPlan.summary}</span>
                 </label>
                 <label className="field-label">
                   Segmento IPAM
@@ -487,18 +514,6 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
 
             {showAdvanced && (
               <div className="advanced-panel">
-                <label className="field-label">
-                  Puerto publico WireGuard
-                  <input
-                    className="field-input"
-                    max="65535"
-                    min="1"
-                    onChange={(event) => updatePeerField("listenPort", event.target.value)}
-                    type="number"
-                    value={peerForm.listenPort}
-                  />
-                  {validation.fieldErrors.listenPort && <span className="field-error">{validation.fieldErrors.listenPort}</span>}
-                </label>
                 <label className="field-label">
                   Endpoint address
                   <input
@@ -691,6 +706,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
               <tr>
                 <th>Router</th>
                 <th>Interfaz</th>
+                <th>Puerto</th>
                 <th>Allowed address</th>
                 <th>Endpoint</th>
                 <th>Handshake</th>
@@ -706,6 +722,7 @@ function WireGuardControl({ routers, selectedRouter, onSyncWireGuard, onWorkspac
                     <span>{tunnel.routerHost}</span>
                   </td>
                   <td>{tunnel.interfaceName}</td>
+                  <td>{tunnel.listenPort || "Sin dato"}</td>
                   <td>{tunnel.allowedAddress || "Sin dato"}</td>
                   <td>{tunnel.endpoint || "Sin endpoint"}</td>
                   <td>{tunnel.lastHandshakeAt || "Sin handshake"}</td>
@@ -739,6 +756,7 @@ function buildReadiness(form, preflight) {
   const items = [
     { label: "Tipo elegido", ready: Boolean(form.vpnType) },
     { label: "Interfaz", ready: Boolean(form.interfaceName) },
+    { label: "Puerto seguro", ready: !preflight.blocking.some((item) => item.scope === "port") },
     { label: "IP del peer", ready: Boolean(form.allowedAddress) },
     { label: "Llave publica", ready: Boolean(form.keyId || form.publicKey) },
     { label: "Sin bloqueo previo", ready: preflight.blocking.length === 0 }
@@ -751,7 +769,7 @@ function buildReadiness(form, preflight) {
   return items;
 }
 
-function buildVpnPreflight(form, selectedRouter, tunnels, ipamAnalysis, firewallState) {
+function buildVpnPreflight(form, selectedRouter, tunnels, ipamAnalysis, firewallState, portPlan) {
   const items = [];
   const blocking = [];
   const normalizedAllowed = String(form.allowedAddress || "").trim();
@@ -775,6 +793,20 @@ function buildVpnPreflight(form, selectedRouter, tunnels, ipamAnalysis, firewall
     label: "Router seleccionado",
     detail: selectedRouter ? `${selectedRouter.alias} sera el origen de la orquestacion.` : "Selecciona un router real antes de aplicar."
   });
+
+  items.push({
+    severity: portPlan.severity,
+    label: "Puerto UDP",
+    detail: portPlan.detail
+  });
+
+  for (const issue of portPlan.blocking) {
+    blocking.push({
+      scope: "port",
+      label: "Puerto WireGuard en conflicto",
+      detail: issue.detail
+    });
+  }
 
   items.push({
     severity: selectedSegment ? "ok" : "warning",
@@ -863,6 +895,164 @@ function buildVpnPreflight(form, selectedRouter, tunnels, ipamAnalysis, firewall
     items,
     blocking
   };
+}
+
+function buildPortPlan(form, selectedRouter, tunnels, firewallState) {
+  const port = Number(form.listenPort || 0);
+  const interfaceName = String(form.interfaceName || "").trim();
+  const items = [];
+  const blocking = [];
+  const sameInterfacePort = tunnels.find((tunnel) =>
+    interfaceName && tunnel.interfaceName === interfaceName && tunnel.listenPort
+  )?.listenPort;
+  const suggestedPort = suggestWireGuardPort(selectedRouter, tunnels, firewallState, interfaceName);
+
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return {
+      severity: "error",
+      summary: "Puerto invalido.",
+      detail: "El puerto UDP debe estar entre 1 y 65535.",
+      suggestedPort,
+      blocking: [{ detail: "El puerto UDP debe estar entre 1 y 65535." }]
+    };
+  }
+
+  if ([Number(selectedRouter?.apiPort), Number(selectedRouter?.webfigPort)].includes(port)) {
+    items.push({
+      severity: "warning",
+      detail: `Coincide con un puerto de gestion del router (${port}).`
+    });
+  }
+
+  const otherInterface = tunnels.find((tunnel) =>
+    tunnel.listenPort === port && interfaceName && tunnel.interfaceName !== interfaceName
+  );
+  const sameInterface = tunnels.find((tunnel) =>
+    tunnel.listenPort === port && interfaceName && tunnel.interfaceName === interfaceName
+  );
+
+  if (otherInterface) {
+    blocking.push({
+      detail: `El puerto ${port} ya esta sincronizado en ${otherInterface.interfaceName}.`
+    });
+  } else if (sameInterface) {
+    items.push({
+      severity: "ok",
+      detail: `Coincide con la interfaz ${sameInterface.interfaceName} sincronizada.`
+    });
+  } else if (sameInterfacePort && sameInterfacePort !== port) {
+    items.push({
+      severity: "warning",
+      detail: `La interfaz ${interfaceName} usa ${sameInterfacePort}; revisa si quieres abrir otro puerto.`
+    });
+  }
+
+  const matchingRules = (firewallState?.rules || []).filter((rule) => portListIncludes(rule.dstPort, port));
+  const blockingRule = matchingRules.find((rule) => ["drop", "reject"].includes(rule.action));
+  const wireGuardRule = matchingRules.find((rule) =>
+    rule.protocol === "udp" && /WireGuard|VPN WG CONTROL/i.test(rule.comment || "")
+  );
+  const unrelatedUdpRule = matchingRules.find((rule) =>
+    rule.protocol === "udp" && !/WireGuard|VPN WG CONTROL/i.test(rule.comment || "") && !["drop", "reject"].includes(rule.action)
+  );
+
+  if (blockingRule) {
+    blocking.push({
+      detail: `Hay regla firewall ${blockingRule.action} usando dst-port ${blockingRule.dstPort}.`
+    });
+  } else if (unrelatedUdpRule) {
+    items.push({
+      severity: "warning",
+      detail: `Existe una regla UDP previa para ${port} que no esta marcada como WireGuard.`
+    });
+  } else if (wireGuardRule) {
+    items.push({
+      severity: "ok",
+      detail: `Firewall ya tiene regla WireGuard para UDP ${port}.`
+    });
+  }
+
+  if (blocking.length > 0) {
+    return {
+      severity: "error",
+      summary: `Puerto ${port} bloqueado por conflicto.`,
+      detail: blocking[0].detail,
+      suggestedPort,
+      blocking
+    };
+  }
+
+  const warning = items.find((item) => item.severity === "warning");
+  if (warning) {
+    return {
+      severity: "warning",
+      summary: `Puerto ${port} requiere revision.`,
+      detail: warning.detail,
+      suggestedPort,
+      blocking
+    };
+  }
+
+  const ok = items.find((item) => item.severity === "ok");
+  return {
+    severity: "ok",
+    summary: ok ? `Puerto ${port} coherente.` : `Puerto ${port} disponible segun datos sincronizados.`,
+    detail: ok?.detail || `No se detectan conflictos para UDP ${port}.`,
+    suggestedPort,
+    blocking
+  };
+}
+
+function suggestWireGuardPort(selectedRouter, tunnels, firewallState, interfaceName) {
+  const sameInterfacePort = tunnels.find((tunnel) =>
+    interfaceName && tunnel.interfaceName === interfaceName && tunnel.listenPort
+  )?.listenPort;
+
+  if (sameInterfacePort) {
+    return sameInterfacePort;
+  }
+
+  const reserved = new Set([
+    Number(selectedRouter?.apiPort),
+    Number(selectedRouter?.webfigPort),
+    ...tunnels.map((tunnel) => Number(tunnel.listenPort)).filter(Boolean),
+    ...(firewallState?.rules || []).flatMap((rule) => parsePortList(rule.dstPort))
+  ].filter((value) => Number.isInteger(value) && value > 0));
+
+  for (let port = 13231; port <= 13331; port += 1) {
+    if (!reserved.has(port)) {
+      return port;
+    }
+  }
+
+  return 13231;
+}
+
+function portListIncludes(portList, port) {
+  return parsePortList(portList).includes(Number(port));
+}
+
+function parsePortList(value) {
+  return String(value || "")
+    .split(",")
+    .flatMap((part) => {
+      const text = part.trim();
+      if (!text) {
+        return [];
+      }
+
+      if (text.includes("-")) {
+        const [start, end] = text.split("-").map((item) => Number(item.trim()));
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start > end || end - start > 128) {
+          return [];
+        }
+
+        return Array.from({ length: end - start + 1 }, (_item, index) => start + index);
+      }
+
+      const port = Number(text);
+      return Number.isInteger(port) ? [port] : [];
+    });
 }
 
 function getCandidateSegments(ipamAnalysis, vpnType) {

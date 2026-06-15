@@ -135,3 +135,6 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se agrego alerta recuperable cuando el estado local no puede actualizarse, evitando fallos silenciosos en el dashboard.
 - Se unifico feedback operativo en Registro de router y Seguridad con notificaciones, errores visibles y reintentos claros.
 - Se reforzo la copia de guias RouterOS con manejo de error y confirmacion visual.
+- Se agrego persistencia de `listen_port` por interfaz WireGuard sincronizada para validar puertos reales antes de crear VPN.
+- Se movio el puerto UDP al flujo principal del asistente VPN con sugerencia automatica y semaforo de conflicto.
+- Se agrego bloqueo backend contra puertos WireGuard en otra interfaz, reglas firewall `drop/reject` y parser seguro de listas/rangos de puertos.

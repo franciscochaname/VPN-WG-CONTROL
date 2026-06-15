@@ -72,6 +72,7 @@ function initializeDatabase(userDataPath) {
       id TEXT PRIMARY KEY,
       router_id TEXT NOT NULL,
       interface_name TEXT NOT NULL,
+      listen_port INTEGER,
       peer_public_key TEXT,
       allowed_address TEXT,
       endpoint TEXT,
@@ -1095,6 +1096,7 @@ async function orchestrateWireGuardVpn(payload = {}) {
   assertDatabase();
   const plan = validateVpnOrchestrationPayload(payload);
   const router = getRouterWithSecret(plan.routerId);
+  assertVpnPortPlanSafe(router, plan);
   const steps = [];
   const runId = randomUUID();
   const now = new Date().toISOString();
@@ -1274,6 +1276,7 @@ function listWireGuardTunnels(routerId) {
         r.alias AS routerAlias,
         r.host AS routerHost,
         t.interface_name AS interfaceName,
+        t.listen_port AS listenPort,
         t.peer_public_key AS peerPublicKey,
         t.allowed_address AS allowedAddress,
         t.endpoint,
@@ -1295,6 +1298,7 @@ function listWireGuardTunnels(routerId) {
       routerAlias: row.routerAlias,
       routerHost: row.routerHost,
       interfaceName: row.interfaceName,
+      listenPort: row.listenPort ? Number(row.listenPort) : null,
       peerPublicKey: row.peerPublicKey,
       allowedAddress: row.allowedAddress,
       endpoint: row.endpoint,
@@ -1624,10 +1628,32 @@ function findWireGuardPortCandidates(rules) {
 }
 
 function portListIncludes(portList, port) {
-  return String(portList)
+  return parsePortList(portList).includes(Number(port));
+}
+
+function parsePortList(portList) {
+  return String(portList || "")
     .split(",")
-    .map((item) => item.trim())
-    .includes(String(port));
+    .flatMap((item) => {
+      const text = item.trim();
+
+      if (!text) {
+        return [];
+      }
+
+      if (text.includes("-")) {
+        const [start, end] = text.split("-").map((part) => Number(part.trim()));
+
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start > end || end - start > 128) {
+          return [];
+        }
+
+        return Array.from({ length: end - start + 1 }, (_entry, index) => start + index);
+      }
+
+      const value = Number(text);
+      return Number.isInteger(value) ? [value] : [];
+    });
 }
 
 function validateWireGuardPeerPayload(payload) {
@@ -1827,6 +1853,95 @@ function buildOrchestrationNatRules(plan) {
   ];
 }
 
+function assertVpnPortPlanSafe(router, plan) {
+  if (!plan.enableFirewall || !plan.listenPort) {
+    return;
+  }
+
+  const analysis = analyzeRouterPortUsage(router, plan.listenPort, plan.peer.interfaceName);
+  const blocking = analysis.items.filter((item) => item.severity === "error");
+
+  if (blocking.length > 0) {
+    throw new Error(`Puerto WireGuard no seguro: ${blocking[0].detail}`);
+  }
+}
+
+function analyzeRouterPortUsage(router, requestedPort, interfaceName) {
+  const port = Number(requestedPort || 0);
+  const items = [];
+
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return {
+      port,
+      items: [{ severity: "error", detail: "El puerto debe estar entre 1 y 65535." }]
+    };
+  }
+
+  if ([Number(router.apiPort), Number(router.webfigPort)].includes(port)) {
+    items.push({
+      severity: "warning",
+      detail: `El puerto ${port} coincide con un servicio de gestion del router. Usa otro puerto para evitar confusion operativa.`
+    });
+  }
+
+  const tunnels = listWireGuardTunnels(router.id);
+  const sameInterface = tunnels.find((tunnel) => tunnel.interfaceName === interfaceName && tunnel.listenPort === port);
+  const otherInterface = tunnels.find((tunnel) => tunnel.interfaceName !== interfaceName && tunnel.listenPort === port);
+
+  if (otherInterface) {
+    items.push({
+      severity: "error",
+      detail: `El puerto ${port} ya pertenece a la interfaz ${otherInterface.interfaceName}.`
+    });
+  } else if (sameInterface) {
+    items.push({
+      severity: "ok",
+      detail: `El puerto ${port} coincide con la interfaz ${interfaceName} sincronizada.`
+    });
+  }
+
+  const firewall = listFirewall(router.id);
+  const matchingRules = firewall.rules.filter((rule) => portListIncludes(rule.dstPort, port));
+  const appWireGuardRule = matchingRules.find((rule) =>
+    rule.protocol === "udp" && /WireGuard|VPN WG CONTROL/i.test(rule.comment || "")
+  );
+  const blockingRule = matchingRules.find((rule) =>
+    rule.action === "drop" || rule.action === "reject"
+  );
+  const unrelatedUdpRule = matchingRules.find((rule) =>
+    rule.protocol === "udp" && !/WireGuard|VPN WG CONTROL/i.test(rule.comment || "") && !["drop", "reject"].includes(rule.action)
+  );
+
+  if (blockingRule) {
+    items.push({
+      severity: "error",
+      detail: `Existe una regla firewall ${blockingRule.action} usando dst-port ${blockingRule.dstPort}.`
+    });
+  } else if (unrelatedUdpRule) {
+    items.push({
+      severity: "warning",
+      detail: `El puerto ${port} aparece en una regla UDP existente que no pertenece a WireGuard.`
+    });
+  } else if (appWireGuardRule) {
+    items.push({
+      severity: "ok",
+      detail: `Ya existe una regla WireGuard para UDP ${port}.`
+    });
+  }
+
+  if (items.length === 0) {
+    items.push({
+      severity: "ok",
+      detail: `El puerto UDP ${port} no muestra conflictos en datos sincronizados.`
+    });
+  }
+
+  return {
+    port,
+    items
+  };
+}
+
 function getPublicKeyFromVault(keyId) {
   const row = db.prepare("SELECT public_key AS publicKey FROM tb_wireguard_keys WHERE id = ?").get(keyId);
 
@@ -1890,13 +2005,20 @@ function toConnectionConfig(router) {
 }
 
 function replaceWireGuardTunnels(routerId, state, now) {
-  const interfaceNames = new Set(state.interfaces.map((item) => item.name).filter(Boolean));
+  const interfaceByName = new Map(
+    state.interfaces
+      .filter((item) => item.name)
+      .map((item) => [item.name, item])
+  );
+  const interfaceNames = new Set(interfaceByName.keys());
   const rows = state.peers.map((peer) => {
     const interfaceName = peer.interface || peer["interface-name"] || "wireguard";
+    const wireGuardInterface = interfaceByName.get(interfaceName) || {};
     return {
       id: createTunnelId(routerId, interfaceName, peer["public-key"] || "", peer["allowed-address"] || ""),
       routerId,
       interfaceName,
+      listenPort: toNullableInteger(wireGuardInterface["listen-port"]),
       peerPublicKey: peer["public-key"] || null,
       allowedAddress: peer["allowed-address"] || null,
       endpoint: buildEndpoint(peer),
@@ -1915,6 +2037,7 @@ function replaceWireGuardTunnels(routerId, state, now) {
         id: createTunnelId(routerId, interfaceName, "", ""),
         routerId,
         interfaceName,
+        listenPort: toNullableInteger(interfaceByName.get(interfaceName)?.["listen-port"]),
         peerPublicKey: null,
         allowedAddress: null,
         endpoint: null,
@@ -1934,6 +2057,7 @@ function replaceWireGuardTunnels(routerId, state, now) {
       id,
       router_id,
       interface_name,
+      listen_port,
       peer_public_key,
       allowed_address,
       endpoint,
@@ -1944,7 +2068,7 @@ function replaceWireGuardTunnels(routerId, state, now) {
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   db.exec("BEGIN");
@@ -1955,6 +2079,7 @@ function replaceWireGuardTunnels(routerId, state, now) {
         row.id,
         row.routerId,
         row.interfaceName,
+        row.listenPort,
         row.peerPublicKey,
         row.allowedAddress,
         row.endpoint,
@@ -2280,6 +2405,11 @@ function createTunnelId(routerId, interfaceName, publicKey, allowedAddress) {
 function toInteger(value) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
+}
+
+function toNullableInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) ? number : null;
 }
 
 function cleanText(value) {
@@ -3245,6 +3375,7 @@ function parseJsonSafe(value) {
 }
 
 function runMigrations() {
+  ensureColumn("tb_tuneles", "listen_port", "INTEGER");
   ensureColumn("tb_config_router", "webfig_port", "INTEGER NOT NULL DEFAULT 8443");
   ensureColumn("tb_config_router", "webfig_tls", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn("tb_config_router", "last_error", "TEXT");

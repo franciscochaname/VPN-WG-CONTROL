@@ -875,6 +875,29 @@ button {
   font-weight: 800;
 }
 
+.field-hint {
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.35;
+  padding: 7px 9px;
+}
+
+.field-hint-ok {
+  background: #edf5ef;
+  color: #3d7c66;
+}
+
+.field-hint-warning {
+  background: #fff1d6;
+  color: #9b6220;
+}
+
+.field-hint-error {
+  background: #fff1ed;
+  color: #a94727;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
