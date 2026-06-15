@@ -1,4 +1,4 @@
-import { CheckCircle2, Clipboard, KeyRound, LockKeyhole, Network, Router, Save, ServerCog, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Clipboard, KeyRound, Router, Save, ServerCog, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { createRouter, isElectronPersistenceAvailable } from "../../shared/api/routerStore.js";
 
@@ -25,7 +25,7 @@ const steps = [
   { id: "guide", label: "Guia RouterOS", icon: ServerCog }
 ];
 
-function RouterRegistration({ onRouterCreated }) {
+function RouterRegistration({ onRouterCreated, onNotify }) {
   const [form, setForm] = useState(initialForm);
   const [activeStep, setActiveStep] = useState("identity");
   const [status, setStatus] = useState({ type: "idle", message: "" });
@@ -41,7 +41,13 @@ function RouterRegistration({ onRouterCreated }) {
     event.preventDefault();
 
     if (!validation.canSave) {
-      setStatus({ type: "error", message: validation.errors[0] || "Revisa los datos del router." });
+      const message = validation.errors[0] || "Revisa los datos del router.";
+      setStatus({ type: "error", message });
+      onNotify?.({
+        type: "warning",
+        title: "Router incompleto",
+        detail: message
+      });
       return;
     }
 
@@ -53,17 +59,43 @@ function RouterRegistration({ onRouterCreated }) {
       setForm(initialForm);
       setActiveStep("identity");
       setStatus({ type: "success", message: `${router.alias} registrado. Valida conexion y servicios desde el panel lateral.` });
-      await onRouterCreated();
+      onNotify?.({
+        type: "success",
+        title: "Router registrado",
+        detail: `${router.alias} ya esta en el inventario local.`
+      });
+      await onRouterCreated?.();
     } catch (error) {
-      setStatus({ type: "error", message: error.message || "No se pudo registrar el router." });
+      const message = error.message || "No se pudo registrar el router.";
+      setStatus({ type: "error", message });
+      onNotify?.({
+        type: "error",
+        title: "Registro detenido",
+        detail: message
+      });
     } finally {
       setIsSaving(false);
     }
   }
 
   async function copyCommands() {
-    await navigator.clipboard.writeText(commands.join("\n"));
-    setStatus({ type: "success", message: "Comandos copiados. Revisa antes de pegarlos en RouterOS." });
+    try {
+      await navigator.clipboard.writeText(commands.join("\n"));
+      setStatus({ type: "success", message: "Comandos copiados. Revisa antes de pegarlos en RouterOS." });
+      onNotify?.({
+        type: "success",
+        title: "Guia copiada",
+        detail: "Los comandos RouterOS quedaron en el portapapeles."
+      });
+    } catch (error) {
+      const message = error.message || "No se pudo copiar la guia RouterOS.";
+      setStatus({ type: "error", message });
+      onNotify?.({
+        type: "error",
+        title: "Copia fallida",
+        detail: message
+      });
+    }
   }
 
   return (

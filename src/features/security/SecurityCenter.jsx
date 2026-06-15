@@ -2,14 +2,35 @@ import { Database, EyeOff, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-re
 import { useEffect, useState } from "react";
 import { getSecurityHealth } from "../../shared/api/securityStore.js";
 
-function SecurityCenter() {
+function SecurityCenter({ onNotify }) {
   const [health, setHealth] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [securityError, setSecurityError] = useState("");
 
-  async function refreshHealth() {
+  async function refreshHealth(options = {}) {
     setIsLoading(true);
+    setSecurityError("");
     try {
-      setHealth(await getSecurityHealth());
+      const nextHealth = await getSecurityHealth();
+      setHealth(nextHealth);
+
+      if (options.notify) {
+        onNotify?.({
+          type: nextHealth.encryptionAvailable && nextHealth.canEncryptDecrypt ? "success" : "warning",
+          title: "Seguridad verificada",
+          detail: nextHealth.encryptionAvailable && nextHealth.canEncryptDecrypt
+            ? "Cifrado local y aislamiento revisados correctamente."
+            : "La verificacion termino con puntos por revisar."
+        });
+      }
+    } catch (error) {
+      const message = error.message || "No se pudo verificar seguridad local.";
+      setSecurityError(message);
+      onNotify?.({
+        type: "error",
+        title: "Verificacion fallida",
+        detail: message
+      });
     } finally {
       setIsLoading(false);
     }
@@ -29,11 +50,13 @@ function SecurityCenter() {
             Verificacion ejecutada sobre la base local, el cifrado y el canal seguro de la app.
           </p>
         </div>
-        <button className="action-button" disabled={isLoading} onClick={refreshHealth} type="button">
+        <button className="action-button" disabled={isLoading} onClick={() => refreshHealth({ notify: true })} type="button">
           <RefreshCw size={16} />
           <span>{isLoading ? "Verificando" : "Verificar"}</span>
         </button>
       </div>
+
+      {securityError && <div className="form-message form-message-error mb-4">{securityError}</div>}
 
       {!health ? (
         <div className="empty-panel">Cargando verificacion de seguridad.</div>

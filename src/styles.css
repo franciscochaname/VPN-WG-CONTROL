@@ -1138,6 +1138,48 @@ button {
   color: #3d7c66;
 }
 
+.workspace-alert {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 14px;
+  align-items: center;
+  margin-top: 14px;
+  border-radius: 8px;
+  border: 1px solid #efc5b5;
+  background: #fff1ed;
+  color: #73695f;
+  padding: 12px 14px;
+}
+
+.workspace-alert strong,
+.workspace-alert span {
+  min-width: 0;
+}
+
+.workspace-alert strong {
+  color: #a94727;
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.workspace-alert span {
+  grid-column: 1;
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.workspace-alert button {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  border-radius: 8px;
+  background: #a94727;
+  color: #fffdf8;
+  font-size: 0.8rem;
+  font-weight: 850;
+  padding: 8px 10px;
+}
+
 .empty-panel {
   display: flex;
   min-height: 220px;

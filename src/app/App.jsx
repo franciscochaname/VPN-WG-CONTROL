@@ -63,6 +63,7 @@ function App() {
   });
   const [selectedRouterId, setSelectedRouterId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState("");
 
   const selectedRouter = useMemo(
     () => routers.find((router) => router.id === selectedRouterId) || routers[0] || null,
@@ -88,6 +89,7 @@ function App() {
 
     try {
       const snapshot = await getDashboardSnapshot();
+      setWorkspaceError("");
       setRouters(snapshot.routers);
       setTunnels(snapshot.tunnels || []);
       setMetrics(snapshot.metrics);
@@ -124,12 +126,23 @@ function App() {
 
         return snapshot.routers[0]?.id || null;
       });
+    } catch (error) {
+      const message = error.message || "No se pudo cargar el estado local del sistema.";
+      setWorkspaceError(message);
+
+      if (!options.silent) {
+        notify({
+          type: "error",
+          title: "Estado local no disponible",
+          detail: message
+        });
+      }
     } finally {
       if (!options.silent) {
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [notify]);
 
   async function handleSyncWireGuard(routerId) {
     const snapshot = await syncWireGuard(routerId);
@@ -171,6 +184,14 @@ function App() {
           selectedRouter={selectedRouter}
           onNavigate={setActiveView}
         />
+
+        {workspaceError && (
+          <div className="workspace-alert">
+            <strong>No se pudo actualizar el estado local</strong>
+            <span>{workspaceError}</span>
+            <button onClick={() => refreshWorkspace()} type="button">Reintentar</button>
+          </div>
+        )}
 
         <div className="grid flex-1 grid-cols-1 gap-5 py-5 lg:grid-cols-[300px_minmax(0,1fr)]">
           <Sidebar
@@ -223,7 +244,7 @@ function ContentView({
   onNotify
 }) {
   if (activeView === "routers") {
-    return <RouterRegistration onRouterCreated={onRouterCreated} />;
+    return <RouterRegistration onRouterCreated={onRouterCreated} onNotify={onNotify} />;
   }
 
   if (activeView === "wireguard") {
@@ -239,7 +260,7 @@ function ContentView({
   }
 
   if (activeView === "security") {
-    return <SecurityCenter />;
+    return <SecurityCenter onNotify={onNotify} />;
   }
 
   if (activeView === "firewall") {

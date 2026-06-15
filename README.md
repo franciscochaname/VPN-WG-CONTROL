@@ -132,3 +132,6 @@ Las credenciales del router no se devuelven al frontend. El token o clave se cif
 - Se mejoro el asistente WireGuard por escenarios claros: laptop a router, router a router, sucursal con NAT y troncal de red.
 - Se conecto la creacion de VPN con IPAM y firewall para validar segmento, sugerir IP libre, bloquear duplicados y detectar solapes antes de orquestar.
 - Se agrego panel de analisis previo para revisar router, segmento, peer, ruta remota, conflictos IPAM y firewall antes de aplicar comandos.
+- Se agrego alerta recuperable cuando el estado local no puede actualizarse, evitando fallos silenciosos en el dashboard.
+- Se unifico feedback operativo en Registro de router y Seguridad con notificaciones, errores visibles y reintentos claros.
+- Se reforzo la copia de guias RouterOS con manejo de error y confirmacion visual.
